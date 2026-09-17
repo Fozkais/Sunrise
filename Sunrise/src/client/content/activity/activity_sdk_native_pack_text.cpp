@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -10,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -137,6 +139,10 @@ struct AuthoredTextCandidate final {
     std::uint32_t slotIndex{};
     std::uint32_t cueIndex{format::kAbsentIndex};
     std::uint32_t definitionHash{};
+    std::uint32_t lineIndex{};
+    std::uint32_t takeIndex{};
+    std::uint32_t audioTag{};
+    std::uint32_t durationMs{};
 };
 
 /** The localized fields are one directive element, not several selectable directives. */
@@ -151,7 +157,7 @@ struct AuthoredDirectiveCandidate final {
     std::uint32_t elementCount{};
 };
 
-/** Logs one dialogue list fact that changes which cues carry lines, and its cue context. */
+/** Logs one dialogue list fact that changes which cues carry lines, with its context. */
 void log_dialogue_list(const squads::DescriptorFact& descriptor,
                        std::uint32_t listTag,
                        const char* result,
@@ -177,6 +183,14 @@ void log_dialogue_list(const squads::DescriptorFact& descriptor,
             level,
             {line.data(), (std::min)(static_cast<std::size_t>(written), line.size() - 1U)});
     }
+}
+
+/** Rounds seconds to the nearest millisecond, saturating at the row's width. */
+[[nodiscard]] std::uint32_t milliseconds(float seconds) noexcept {
+    const double value = std::round(static_cast<double>(seconds) * 1000.0);
+    return value >= static_cast<double>((std::numeric_limits<std::uint32_t>::max)())
+               ? (std::numeric_limits<std::uint32_t>::max)()
+               : static_cast<std::uint32_t>(value);
 }
 
 } // namespace
@@ -263,8 +277,9 @@ bool attach_combat_objective_groups(const topology_inventory::Snapshot& topology
     }
 }
 
-/** Extracts localized dialogue aliases and safe authored directive elements. */
+/** Extracts dialogue cues, their localized lines, and safe authored directive elements. */
 bool attach_authored_text(const topology_inventory::Snapshot& topology,
+                          const topology_enrichment::Snapshot& enrichment,
                           const squads::Facts& facts,
                           PackageContext& packageContext,
                           authored_scene::Snapshot& output) {
@@ -296,8 +311,15 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
                && container->classId == display::kStringContainerClass;
     };
     try {
+        if (enrichment.slots.size() != topology.slots.size()) {
+            return false;
+        }
         std::vector<AuthoredTextCandidate> dialogueCandidates{};
         std::vector<AuthoredDirectiveCandidate> directiveCandidates{};
+        // The list each type-53 slot's cues were taken from; a second descriptor of the slot that
+        // references another list makes the slot's cues unknowable, so the slot keeps none.
+        std::unordered_map<std::uint32_t, std::uint32_t> dialogueListBySlot{};
+        std::unordered_set<std::uint32_t> conflictingDialogueSlots{};
         for (const squads::DescriptorFact& descriptor : facts.descriptors) {
             if (descriptor.slotIndex >= topology.slots.size()) {
                 continue;
@@ -323,6 +345,20 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
                 if (resource->classId != format::kDialogueAuthoredListClass) {
                     continue;
                 }
+                const auto [known, firstList] =
+                    dialogueListBySlot.emplace(descriptor.slotIndex, resourceTag);
+                if (!firstList) {
+                    if (known->second != resourceTag) {
+                        conflictingDialogueSlots.insert(descriptor.slotIndex);
+                        log_dialogue_list(descriptor,
+                                          resourceTag,
+                                          "list_conflict",
+                                          known->second,
+                                          0,
+                                          core::log::Level::warn);
+                    }
+                    continue;
+                }
                 dialogue_list::Snapshot list{};
                 if (!dialogue_list::read(bytes, list)) {
                     log_dialogue_list(
@@ -337,8 +373,47 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
                                       shared.treeCount,
                                       core::log::Level::info);
                 }
+                // An empty list authors no cue, so its slot never gets an exact cue count.
+                if (list.cues.empty()) {
+                    continue;
+                }
+                // Cue rows follow the slot's cue count, which the same list gave.
+                const topology_enrichment::Slot& enriched = enrichment.slots[descriptor.slotIndex];
+                if ((enriched.flags & format::kSlotDialogueCuesExact) == 0
+                    || enriched.dialogueCueCount != list.cues.size()) {
+                    log_dialogue_list(descriptor,
+                                      resourceTag,
+                                      "count_mismatch",
+                                      0,
+                                      static_cast<std::uint32_t>(list.cues.size()),
+                                      core::log::Level::warn);
+                    continue;
+                }
                 for (std::size_t cue = 0; cue < list.cues.size(); ++cue) {
                     const dialogue_list::Cue& row = list.cues[cue];
+                    authored_scene::DialogueCue cueRow{};
+                    char cueId[64]{};
+                    const int cueIdLength = std::snprintf(cueId,
+                                                          sizeof cueId,
+                                                          "dialogue_cue/%08x/%u",
+                                                          descriptor.slotIndex,
+                                                          static_cast<unsigned>(cue));
+                    if (cueIdLength <= 0 || static_cast<std::size_t>(cueIdLength) >= sizeof cueId
+                        || !copy_text(
+                            std::string_view(cueId, static_cast<std::size_t>(cueIdLength)),
+                            cueRow.id)) {
+                        return false;
+                    }
+                    cueRow.slotIndex = descriptor.slotIndex;
+                    cueRow.cueIndex = static_cast<std::uint32_t>(cue);
+                    cueRow.listTag = resourceTag;
+                    cueRow.definitionHash = row.definitionHash;
+                    cueRow.durationMs = milliseconds(row.seconds);
+                    if (row.status == dialogue_list::CueStatus::resolved) {
+                        cueRow.lineCount = row.lineCount;
+                        cueRow.flags = format::kDialogueCueLinesExact;
+                    }
+                    output.dialogueCues.push_back(cueRow);
                     if (row.status == dialogue_list::CueStatus::ambiguous
                         || row.status == dialogue_list::CueStatus::missing
                         || row.status == dialogue_list::CueStatus::malformed) {
@@ -353,22 +428,28 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
                             core::log::Level::warn);
                         continue;
                     }
-                    // Both takes of a line normally reference the same text; each distinct
-                    // reference is still a candidate, and the Lua publisher folds equal texts.
-                    for (std::uint32_t offset = 0; offset < row.lineCount; ++offset) {
-                        const dialogue_list::Line& line = list.lines[row.firstLine + offset];
-                        for (const dialogue_list::Take* take : {&line.first, &line.second}) {
+                    // Both takes of a line normally reference the same text; each is still its
+                    // own row, and the Lua publisher folds equal texts.
+                    for (std::uint32_t lineIndex = 0; lineIndex < row.lineCount; ++lineIndex) {
+                        const dialogue_list::Line& line = list.lines[row.firstLine + lineIndex];
+                        const std::array<const dialogue_list::Take*, format::kDialogueTakeCount>
+                            takes{&line.first, &line.second};
+                        for (std::uint32_t takeIndex = 0; takeIndex < takes.size(); ++takeIndex) {
+                            const dialogue_list::Take& take = *takes[takeIndex];
                             const CachedTag* container = nullptr;
-                            if (take->containerTag == 0
-                                || take->containerTag == format::kAbsentIndex
-                                || !package(take->containerTag, container) || container == nullptr
+                            if (take.containerTag == 0 || take.containerTag == format::kAbsentIndex
+                                || !package(take.containerTag, container) || container == nullptr
                                 || container->classId != display::kStringContainerClass) {
                                 continue;
                             }
-                            dialogueCandidates.push_back({{take->containerTag, take->stringHash},
+                            dialogueCandidates.push_back({{take.containerTag, take.stringHash},
                                                           descriptor.slotIndex,
                                                           static_cast<std::uint32_t>(cue),
-                                                          row.definitionHash});
+                                                          row.definitionHash,
+                                                          lineIndex,
+                                                          takeIndex,
+                                                          take.audioTag,
+                                                          milliseconds(take.seconds)});
                         }
                     }
                 }
@@ -472,6 +553,18 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
             references.push_back(row.description);
             references.push_back(row.progress);
         }
+        const auto conflicting = [&](const auto& row) {
+            return conflictingDialogueSlots.contains(row.slotIndex);
+        };
+        output.dialogueCues.erase(
+            std::remove_if(output.dialogueCues.begin(), output.dialogueCues.end(), conflicting),
+            output.dialogueCues.end());
+        std::sort(output.dialogueCues.begin(),
+                  output.dialogueCues.end(),
+                  [](const auto& first, const auto& second) {
+                      return std::tie(first.slotIndex, first.cueIndex)
+                             < std::tie(second.slotIndex, second.cueIndex);
+                  });
         if (references.empty()) {
             return true;
         }
@@ -485,16 +578,19 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
             if (name.authoredEmpty || name.length == 0) {
                 continue;
             }
+            const AuthoredTextCandidate& candidate = dialogueCandidates[index];
+            if (conflictingDialogueSlots.contains(candidate.slotIndex)) {
+                continue;
+            }
             const std::string_view text(name.value.data(), name.length);
             char id[96]{};
-            const AuthoredTextCandidate& candidate = dialogueCandidates[index];
             const int length = std::snprintf(id,
                                              sizeof id,
-                                             "dialogue/%08x/%u/%08x/%08x",
+                                             "dialogue/%08x/%u/%u/%u",
                                              candidate.slotIndex,
                                              candidate.cueIndex,
-                                             candidate.definitionHash,
-                                             candidate.reference.stringHash);
+                                             candidate.lineIndex,
+                                             candidate.takeIndex);
             authored_scene::DialogueCueText row{};
             if (length <= 0 || static_cast<std::size_t>(length) >= sizeof id
                 || !copy_text(std::string_view(id, static_cast<std::size_t>(length)), row.id)
@@ -506,6 +602,10 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
             row.definitionHash = candidate.definitionHash;
             row.containerTag = candidate.reference.containerTag;
             row.stringHash = candidate.reference.stringHash;
+            row.lineIndex = candidate.lineIndex;
+            row.takeIndex = candidate.takeIndex;
+            row.audioTag = candidate.audioTag;
+            row.durationMs = candidate.durationMs;
             output.dialogueCueTexts.push_back(row);
         }
         std::size_t resolved = dialogueCandidates.size();
@@ -561,10 +661,11 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
             row.flags = candidate.flags;
             output.directiveElements.push_back(row);
         }
+        // Lines keep their play order inside a cue.
         auto dialogueLess = [](const auto& first, const auto& second) {
-            return std::tie(first.slotIndex, first.cueIndex, first.definitionHash, first.stringHash)
+            return std::tie(first.slotIndex, first.cueIndex, first.lineIndex, first.takeIndex)
                    < std::tie(
-                       second.slotIndex, second.cueIndex, second.definitionHash, second.stringHash);
+                       second.slotIndex, second.cueIndex, second.lineIndex, second.takeIndex);
         };
         auto directiveLess = [](const auto& first, const auto& second) {
             return std::tie(first.slotIndex, first.nameHash, first.elementIndex)
@@ -596,8 +697,7 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
 bool attach_dialogue_cue_counts(const topology_inventory::Snapshot& topology,
                                 const squads::Facts& facts,
                                 PackageContext& packageContext,
-                                topology_enrichment::Snapshot& enrichment,
-                                authored_scene::Snapshot& authoredRows) {
+                                topology_enrichment::Snapshot& enrichment) {
     if (topology.slots.size() != enrichment.slots.size()) {
         return false;
     }
@@ -679,11 +779,6 @@ bool attach_dialogue_cue_counts(const topology_inventory::Snapshot& topology,
             if (resolved && sawDescriptor && agreedCount != 0) {
                 enriched.dialogueCueCount = static_cast<std::uint32_t>(agreedCount);
                 enriched.flags |= format::kSlotDialogueCuesExact;
-                for (std::uint32_t cue = 0; cue < agreedDefinitions.size(); ++cue) {
-                    const auto& definition = agreedDefinitions[cue];
-                    authoredRows.dialogueCues.push_back(
-                        {slotRow, cue, definition.hash, definition.authoredWindowSeconds});
-                }
             }
         }
         return true;
