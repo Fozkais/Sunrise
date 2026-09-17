@@ -16,6 +16,7 @@
 #include "../../../core/logging/log.h"
 #include "../../../middleware/content/packages/tables/activity_display_name_reader.h"
 #include "activity_sdk_dialogue_group_index.h"
+#include "activity_sdk_dialogue_list.h"
 #include "activity_sdk_native_pack_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::native_pack_pipeline {
@@ -149,6 +150,34 @@ struct AuthoredDirectiveCandidate final {
     std::int32_t elementIndex{-1};
     std::uint32_t elementCount{};
 };
+
+/** Logs one dialogue list fact that changes which cues carry lines, and its cue context. */
+void log_dialogue_list(const squads::DescriptorFact& descriptor,
+                       std::uint32_t listTag,
+                       const char* result,
+                       std::uint32_t definitionHash,
+                       std::uint32_t count,
+                       core::log::Level level) noexcept {
+    std::array<char, 192> line{};
+    const int written =
+        std::snprintf(line.data(),
+                      line.size(),
+                      "ev=activity_sdk_dialogue_list result=%s config=0x%08X offset=0x%X "
+                      "slot_row=%u list=0x%08X definition=0x%08X count=%u",
+                      result,
+                      static_cast<unsigned>(descriptor.configTag),
+                      static_cast<unsigned>(descriptor.descriptorOffset),
+                      static_cast<unsigned>(descriptor.slotIndex),
+                      static_cast<unsigned>(listTag),
+                      static_cast<unsigned>(definitionHash),
+                      static_cast<unsigned>(count));
+    if (written > 0) {
+        core::log::write(
+            core::log::Channel::client,
+            level,
+            {line.data(), (std::min)(static_cast<std::size_t>(written), line.size() - 1U)});
+    }
+}
 
 } // namespace
 
@@ -294,51 +323,53 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
                 if (resource->classId != format::kDialogueAuthoredListClass) {
                     continue;
                 }
-                std::size_t groups = 0;
-                std::size_t groupCount = 0;
-                if (!read_array(
-                        bytes, 0x18U, 16U, format::kDialogueGroupArrayClass, groups, groupCount)) {
+                dialogue_list::Snapshot list{};
+                if (!dialogue_list::read(bytes, list)) {
+                    log_dialogue_list(
+                        descriptor, resourceTag, "malformed", 0, 0, core::log::Level::warn);
                     continue;
                 }
-                std::size_t definitions = 0;
-                std::size_t definitionCount = 0;
-                if (!read_array(bytes,
-                                8U,
-                                8U,
-                                format::kDialogueDefinitionArrayClass,
-                                definitions,
-                                definitionCount)) {
-                    continue;
+                for (const dialogue_list::SharedHash& shared : list.sharedHashes) {
+                    log_dialogue_list(descriptor,
+                                      resourceTag,
+                                      "shared_hash",
+                                      shared.definitionHash,
+                                      shared.treeCount,
+                                      core::log::Level::info);
                 }
-                std::vector<dialogue_groups::Span> groupIndex{};
-                if (!dialogue_groups::build(bytes, groups, groupCount, groupIndex)) {
-                    continue;
-                }
-                for (std::size_t cue = 0; cue < definitionCount; ++cue) {
-                    std::uint32_t definitionHash = 0;
-                    if (!read_value(bytes, definitions + cue * 8U, definitionHash)
-                        || definitionHash == 0 || definitionHash == 0x811C9DC5U) {
+                for (std::size_t cue = 0; cue < list.cues.size(); ++cue) {
+                    const dialogue_list::Cue& row = list.cues[cue];
+                    if (row.status == dialogue_list::CueStatus::ambiguous
+                        || row.status == dialogue_list::CueStatus::missing
+                        || row.status == dialogue_list::CueStatus::malformed) {
+                        log_dialogue_list(
+                            descriptor,
+                            resourceTag,
+                            row.status == dialogue_list::CueStatus::ambiguous ? "cue_ambiguous"
+                            : row.status == dialogue_list::CueStatus::missing ? "cue_missing"
+                                                                              : "cue_malformed",
+                            row.definitionHash,
+                            static_cast<std::uint32_t>(cue),
+                            core::log::Level::warn);
                         continue;
                     }
-                    dialogue_groups::Span group{};
-                    if (!dialogue_groups::find(groupIndex, definitionHash, group)) {
-                        continue;
-                    }
-                    for (std::size_t offset = group.begin; offset + 8U <= group.end; offset += 4U) {
-                        std::uint32_t containerTag = 0;
-                        std::uint32_t stringHash = 0;
-                        const CachedTag* container = nullptr;
-                        if (!read_value(bytes, offset, containerTag)
-                            || !read_value(bytes, offset + 4U, stringHash)
-                            || containerTag < 0x80A12000U || containerTag >= 0xC0000000U
-                            || !package(containerTag, container) || container == nullptr
-                            || container->classId != display::kStringContainerClass) {
-                            continue;
+                    // Both takes of a line normally reference the same text; each distinct
+                    // reference is still a candidate, and the Lua publisher folds equal texts.
+                    for (std::uint32_t offset = 0; offset < row.lineCount; ++offset) {
+                        const dialogue_list::Line& line = list.lines[row.firstLine + offset];
+                        for (const dialogue_list::Take* take : {&line.first, &line.second}) {
+                            const CachedTag* container = nullptr;
+                            if (take->containerTag == 0
+                                || take->containerTag == format::kAbsentIndex
+                                || !package(take->containerTag, container) || container == nullptr
+                                || container->classId != display::kStringContainerClass) {
+                                continue;
+                            }
+                            dialogueCandidates.push_back({{take->containerTag, take->stringHash},
+                                                          descriptor.slotIndex,
+                                                          static_cast<std::uint32_t>(cue),
+                                                          row.definitionHash});
                         }
-                        dialogueCandidates.push_back({{containerTag, stringHash},
-                                                      descriptor.slotIndex,
-                                                      static_cast<std::uint32_t>(cue),
-                                                      definitionHash});
                     }
                 }
             } else {
