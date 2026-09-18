@@ -512,6 +512,8 @@ squad_anchors(const Catalog& catalog, const format::Squad& squad) noexcept;
 /** Returns every cue of one type-53 slot, indexed by cue. */
 [[nodiscard]] std::span<const format::DialogueCue>
 slot_dialogue_cues(const Catalog& catalog, const format::Slot& slot) noexcept;
+/** Rounds authored seconds to the nearest millisecond, saturating at 32 bits. */
+[[nodiscard]] std::uint32_t authored_milliseconds(float seconds) noexcept;
 /** Returns all exact authored resources retained for one type-43 slot. */
 [[nodiscard]] std::span<const format::AuthoredSceneResource>
 slot_authored_scene_resources(const Catalog& catalog, const format::Slot& slot) noexcept;

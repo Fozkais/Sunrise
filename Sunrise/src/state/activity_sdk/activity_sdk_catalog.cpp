@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
+#include <limits>
 
 #include "internal.h"
 #include "runtime.h"
@@ -791,6 +793,16 @@ std::span<const format::DialogueCue> slot_dialogue_cues(const Catalog& catalog,
         });
     return values.subspan(static_cast<std::size_t>(first - values.begin()),
                           static_cast<std::size_t>(last - first));
+}
+
+std::uint32_t authored_milliseconds(float seconds) noexcept {
+    const double value = std::round(static_cast<double>(seconds) * 1000.0);
+    if (!(value > 0.0)) {
+        return 0;
+    }
+    return value >= static_cast<double>((std::numeric_limits<std::uint32_t>::max)())
+               ? (std::numeric_limits<std::uint32_t>::max)()
+               : static_cast<std::uint32_t>(value);
 }
 
 /** Relies on slot-index ordering to return one contiguous zero-copy resource range. */

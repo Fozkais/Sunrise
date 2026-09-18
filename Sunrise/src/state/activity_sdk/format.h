@@ -1295,18 +1295,18 @@ struct CombatObjectiveGroup final {
 };
 
 /**
- * One type-53 cue, in slot then cue order, with one row for every cue of the slot.
- * Lines are present only when kDialogueCueLinesExact is set.
+ * A delayed cue expires after this authored window; it is not a playback duration.
+ * One row per cue of a type-53 slot, in slot then cue order; lines are present only when
+ * kDialogueCueLinesExact is set.
  */
 struct DialogueCue final {
-    StringRef id{};
     std::uint32_t slotIndex{};
     std::uint32_t cueIndex{};
+    std::uint32_t definitionHash{};
+    float authoredWindowSeconds{};
+    StringRef id{};
     /** Dialogue list the cue was read from, the row's provenance. */
     std::uint32_t listTag{};
-    std::uint32_t definitionHash{};
-    /** Authored play time rounded to the nearest millisecond, whether or not lines were read. */
-    std::uint32_t durationMs{};
     std::uint32_t lineCount{};
     std::uint32_t flags{};
     std::uint32_t reserved{};

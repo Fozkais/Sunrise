@@ -17,6 +17,7 @@
 
 #include "../../../core/logging/log.h"
 #include "../../../middleware/content/packages/tables/activity_display_name_reader.h"
+#include "../../../state/activity_sdk/runtime.h"
 #include "activity_sdk_dialogue_group_index.h"
 #include "activity_sdk_dialogue_list.h"
 #include "activity_sdk_native_pack_internal.h"
@@ -183,14 +184,6 @@ void log_dialogue_list(const squads::DescriptorFact& descriptor,
             level,
             {line.data(), (std::min)(static_cast<std::size_t>(written), line.size() - 1U)});
     }
-}
-
-/** Rounds seconds to the nearest millisecond, saturating at the row's width. */
-[[nodiscard]] std::uint32_t milliseconds(float seconds) noexcept {
-    const double value = std::round(static_cast<double>(seconds) * 1000.0);
-    return value >= static_cast<double>((std::numeric_limits<std::uint32_t>::max)())
-               ? (std::numeric_limits<std::uint32_t>::max)()
-               : static_cast<std::uint32_t>(value);
 }
 
 } // namespace
@@ -408,7 +401,7 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
                     cueRow.cueIndex = static_cast<std::uint32_t>(cue);
                     cueRow.listTag = resourceTag;
                     cueRow.definitionHash = row.definitionHash;
-                    cueRow.durationMs = milliseconds(row.seconds);
+                    cueRow.authoredWindowSeconds = row.seconds;
                     if (row.status == dialogue_list::CueStatus::resolved) {
                         cueRow.lineCount = row.lineCount;
                         cueRow.flags = format::kDialogueCueLinesExact;
@@ -442,14 +435,15 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
                                 || container->classId != display::kStringContainerClass) {
                                 continue;
                             }
-                            dialogueCandidates.push_back({{take.containerTag, take.stringHash},
-                                                          descriptor.slotIndex,
-                                                          static_cast<std::uint32_t>(cue),
-                                                          row.definitionHash,
-                                                          lineIndex,
-                                                          takeIndex,
-                                                          take.audioTag,
-                                                          milliseconds(take.seconds)});
+                            dialogueCandidates.push_back(
+                                {{take.containerTag, take.stringHash},
+                                 descriptor.slotIndex,
+                                 static_cast<std::uint32_t>(cue),
+                                 row.definitionHash,
+                                 lineIndex,
+                                 takeIndex,
+                                 take.audioTag,
+                                 state::activity_sdk::authored_milliseconds(take.seconds)});
                         }
                     }
                 }

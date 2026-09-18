@@ -13,7 +13,7 @@
 #include <vector>
 
 #include "../../../middleware/bap/activity_message/auth_schema_catalog.h"
-#include "../../../state/activity_sdk/scene_triggers.h"
+#include "../../../state/activity_sdk/runtime.h"
 #include "activity_sdk_lua_missions_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::lua_artifacts::internal {
@@ -557,7 +557,8 @@ bool render_mission(const Source& source,
                 dialogueDefinitionConstants.append("] = { hash = ");
                 append_hex(dialogueDefinitionConstants, row.definitionHash);
                 dialogueDefinitionConstants.append(", duration_ms = ");
-                append_uint(dialogueDefinitionConstants, row.durationMs);
+                append_uint(dialogueDefinitionConstants,
+                            state::activity_sdk::authored_milliseconds(row.authoredWindowSeconds));
                 dialogueDefinitionConstants.append(", lines = ");
                 append_uint(dialogueDefinitionConstants, row.lineCount);
                 dialogueDefinitionConstants.append(" },\n");

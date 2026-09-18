@@ -658,7 +658,7 @@ translate_native_rows(const Inputs& inputs, const detail::StringResolver& linker
         target.cueIndex = input.cueIndex;
         target.listTag = input.listTag;
         target.definitionHash = input.definitionHash;
-        target.durationMs = input.durationMs;
+        target.authoredWindowSeconds = input.authoredWindowSeconds;
         target.lineCount = input.lineCount;
         target.flags = input.flags;
         if (!link_text(linker, input.id, target.id)) {

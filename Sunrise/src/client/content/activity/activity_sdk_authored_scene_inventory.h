@@ -84,7 +84,7 @@ struct DialogueCue final {
     std::uint32_t cueIndex{};
     std::uint32_t listTag{};
     std::uint32_t definitionHash{};
-    std::uint32_t durationMs{};
+    float authoredWindowSeconds{};
     std::uint32_t lineCount{};
     std::uint32_t flags{};
 };
