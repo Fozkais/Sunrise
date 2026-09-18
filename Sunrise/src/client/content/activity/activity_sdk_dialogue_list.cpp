@@ -5,13 +5,12 @@
 #include <cstring>
 #include <limits>
 
+#include "activity_sdk_dialogue_group_index.h"
+
 namespace sunrise::client::content::activity::sdk_generation::dialogue_list {
 namespace {
 
-// List fields: the cue definitions in cue order, then the content trees sorted by hash.
-constexpr std::size_t kDefinitionField = 0x08;
-constexpr std::size_t kDefinitionStride = 8;
-constexpr std::uint32_t kDefinitionArrayClass = 0x80808D18U;
+// The cue definitions come in cue order; the content trees that follow are sorted by hash.
 constexpr std::size_t kTreeField = 0x18;
 constexpr std::size_t kTreeStride = 16;
 constexpr std::uint32_t kTreeArrayClass = 0x80808D19U;
@@ -204,16 +203,10 @@ struct Tree final {
 
 bool read(std::span<const std::byte> list, Snapshot& output) {
     output = {};
-    std::size_t definitions = 0;
-    std::size_t definitionCount = 0;
+    std::vector<dialogue_group_index::Definition> definitions{};
     std::size_t treeRows = 0;
     std::size_t treeCount = 0;
-    if (!read_array(list,
-                    kDefinitionField,
-                    kDefinitionStride,
-                    kDefinitionArrayClass,
-                    definitions,
-                    definitionCount)
+    if (!dialogue_group_index::definitions(list, definitions)
         || !read_array(list, kTreeField, kTreeStride, kTreeArrayClass, treeRows, treeCount)) {
         return false;
     }
@@ -239,14 +232,11 @@ bool read(std::span<const std::byte> list, Snapshot& output) {
         first = last;
     }
 
-    output.cues.resize(definitionCount);
-    for (std::size_t index = 0; index < definitionCount; ++index) {
+    output.cues.resize(definitions.size());
+    for (std::size_t index = 0; index < definitions.size(); ++index) {
         Cue& cue = output.cues[index];
-        const std::size_t row = definitions + index * kDefinitionStride;
-        if (!read_value(list, row, cue.definitionHash) || !read_value(list, row + 4U, cue.seconds)
-            || !std::isfinite(cue.seconds) || cue.seconds < 0.0F) {
-            return false;
-        }
+        cue.definitionHash = definitions[index].hash;
+        cue.seconds = definitions[index].authoredWindowSeconds;
         const auto range = std::equal_range(trees.begin(),
                                             trees.end(),
                                             Tree{cue.definitionHash, 0},
