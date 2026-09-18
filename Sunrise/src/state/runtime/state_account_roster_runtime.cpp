@@ -1,13 +1,94 @@
 /** Character creation and deletion logic. */
 
+#include <array>
 #include <cstdint>
 
 #include "../../core/logging/log.h"
 #include "../account/account_state.h"
+#include "../account/inventory/inventory_state.h"
 #include "../investment/store_internal.h"
 #include "runtime.h"
+#include "state_account_transaction_helpers.h"
 
 namespace sunrise::state {
+namespace {
+
+namespace authored_inventory = account::inventory;
+
+/** One authored equipment slot this build seeds every newly created character with. */
+struct StarterItem {
+    authored_inventory::EquipmentSlot slot;
+    std::uint32_t definitionHash;
+    std::int32_t level;
+};
+
+/**
+ * The account's own single authored default character already carries a complete, proven-valid
+ * 17-slot loadout (every native equipment slot, including the 8 that feed the Family-4 light
+ * divisor). Item definitions here carry no class restriction, so the same set is safe to grant
+ * regardless of the requested class -- it is exactly what this build already ships as its one
+ * default character's own gear. Hashes and levels are copied verbatim from
+ * `resources/database/investment_defaults.sql`'s seed rows for character slot 0.
+ */
+constexpr std::array<StarterItem, 17> kStarterLoadout{{
+    {authored_inventory::EquipmentSlot::kinetic, 3843477312U, 106},
+    {authored_inventory::EquipmentSlot::energy, 1096206669U, 106},
+    {authored_inventory::EquipmentSlot::heavy, 1864563948U, 106},
+    {authored_inventory::EquipmentSlot::helmet, 4070132608U, 106},
+    {authored_inventory::EquipmentSlot::gauntlets, 1636205905U, 106},
+    {authored_inventory::EquipmentSlot::chest, 1863170823U, 106},
+    {authored_inventory::EquipmentSlot::legs, 193869520U, 106},
+    {authored_inventory::EquipmentSlot::classItem, 3044599574U, 106},
+    {authored_inventory::EquipmentSlot::ghost, 4135938409U, 0},
+    {authored_inventory::EquipmentSlot::vehicle, 3317837688U, 0},
+    {authored_inventory::EquipmentSlot::ship, 292872938U, 0},
+    {authored_inventory::EquipmentSlot::subclass, 3635991036U, 0},
+    {authored_inventory::EquipmentSlot::clanBanner, 1460578929U, 0},
+    {authored_inventory::EquipmentSlot::emblem, 1907674138U, 0},
+    {authored_inventory::EquipmentSlot::emote, 2038017661U, 0},
+    {authored_inventory::EquipmentSlot::finisher, 152583919U, 0},
+    {authored_inventory::EquipmentSlot::artifact, 1631206822U, 0},
+}};
+
+/**
+ * Equips the fixed starter loadout, each item given a freshly allocated instance SOID instead of
+ * a fixed one: the same 17 hashes are granted to every created character, so a literal SOID would
+ * collide the moment more than one character has ever carried this loadout.
+ * @param account In-out account; scanned for collision-free SOIDs as each item is assigned one.
+ *                Must already count `character` towards `characterCount`, so the scan sees this
+ *                character's own items as they are assigned, not just prior characters.
+ * @param character In-out character, already appended to account.characters and counted.
+ * @return False when a fresh SOID could not be allocated; the character is left without a
+ *         loadout, exactly as it started, rather than half-equipped.
+ */
+[[nodiscard]] bool seed_starter_loadout(AccountState& account, CharacterState& character) noexcept {
+    std::int32_t maxMutationSerial = -1;
+    std::int32_t serial = 0;
+    for (const StarterItem& starter : kStarterLoadout) {
+        std::uint64_t freshSoid = 0;
+        if (!runtime::detail::next_item_instance_soid(account, freshSoid)) {
+            character.equipment = {};
+            core::log::write(core::log::Channel::state,
+                             core::log::Level::warn,
+                             "ev=create_character stage=loadout result=fail reason=soid_exhausted");
+            return false;
+        }
+        authored_inventory::Item item{};
+        item.instanceSoid = freshSoid;
+        item.definitionHash = starter.definitionHash;
+        item.level = starter.level;
+        item.quantity = 1;
+        item.mutationSerial = serial;
+        item.sockets.policy = authored_inventory::SocketPolicy::nativeDefaults;
+        character.equipment.slots[static_cast<std::size_t>(starter.slot)] = item;
+        maxMutationSerial = serial;
+        ++serial;
+    }
+    character.nextInventorySerial = static_cast<std::uint32_t>(maxMutationSerial + 1);
+    return true;
+}
+
+} // namespace
 
 bool create_character(std::uint8_t characterClass,
                       std::uint8_t gender,
@@ -84,6 +165,17 @@ bool create_character(std::uint8_t characterClass,
     }
     character.selected = true;
     ++candidate.characterCount;
+
+    // Counted above so the fresh-SOID scan inside sees this character's own items as they are
+    // assigned, not just the characters that existed before it. Without a loadout the character
+    // has no equipped gear, and the Family-4 encoder refuses to publish a character with nothing
+    // equipped (an empty gear set has no light average to divide), so it would exist in the
+    // database but never actually reach the client.
+    if (!seed_starter_loadout(candidate, character)) {
+        investment::store::g_mutex.unlock();
+        characterSoid = 0;
+        return false;
+    }
 
     if (!account::valid(candidate) || !investment::store::write_account(candidate)) {
         investment::store::g_mutex.unlock();
