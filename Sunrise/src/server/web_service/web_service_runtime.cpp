@@ -14,6 +14,8 @@
 #include "../../middleware/web_service/messages/opcode206.h"
 #include "../../middleware/web_service/messages/opcode2400.h"
 #include "../../middleware/web_service/messages/opcode501_codec.h"
+#include "../../middleware/web_service/messages/opcode501_request_codec.h"
+#include "../../middleware/web_service/messages/opcode502.h"
 #include "../../middleware/web_service/messages/opcode503.h"
 #include "../../middleware/web_service/messages/opcode504.h"
 #include "../../middleware/web_service/messages/opcode601/opcode601_codec.h"
@@ -337,12 +339,30 @@ bool consume(std::span<const std::byte> request,
     }
 
     if (message.opcode == middleware::web_service::messages::opcode501::kOpcode) {
-        // Returns a SOID family three already publishes. The request body is not parsed.
-        const std::uint64_t characterSoid =
-            state::account::selected_character_soid(state::account_snapshot());
+        middleware::web_service::messages::opcode501::Request created{};
+        std::uint64_t characterSoid = 0;
+        if (!middleware::web_service::messages::opcode501::parse_request(message, created)
+            || !state::create_character(
+                created.characterClass, created.gender, created.race, characterSoid)) {
+            core::log::write(
+                core::log::Channel::server, core::log::Level::warn, "ev=ws501 stage=create result=fail");
+            // The client still needs an answer even when creation fails; falling back to the
+            // selected character keeps the response shape valid instead of leaving it unanswered.
+            characterSoid = state::account::selected_character_soid(state::account_snapshot());
+        }
         return middleware::web_service::messages::opcode501::encode_response(
                    message, characterSoid, response, written)
                || encode_echo(message, response, written);
+    }
+
+    if (message.opcode == middleware::web_service::messages::opcode502::kOpcode) {
+        middleware::web_service::messages::opcode502::Request targeted{};
+        if (!middleware::web_service::messages::opcode502::parse_request(message, targeted)
+            || !state::delete_character(targeted.characterSoid)) {
+            core::log::write(
+                core::log::Channel::server, core::log::Level::warn, "ev=ws502 stage=delete result=fail");
+        }
+        return encode_echo(message, response, written);
     }
 
     // The artifact vendor is answered here. Every other vendor purchase falls through to the
