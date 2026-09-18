@@ -23,54 +23,87 @@ struct StarterItem {
 };
 
 /**
- * The account's own single authored default character already carries a complete, proven-valid
- * 17-slot loadout (every native equipment slot, including the 8 that feed the Family-4 light
- * divisor). Item definitions here carry no class restriction, so the same set is safe to grant
- * regardless of the requested class -- it is exactly what this build already ships as its one
- * default character's own gear. Hashes and levels are copied verbatim from
- * `resources/database/investment_defaults.sql`'s seed rows for character slot 0.
+ * The 10 equipment slots the real client draws identically regardless of class: weapons, and the
+ * cosmetic/utility slots (ghost, vehicle, ship, clan banner, emote, finisher, artifact). Hashes
+ * and levels are copied verbatim from `resources/database/investment_defaults.sql`'s seed rows
+ * for character slot 0, and cross-checked against the T4tsuk3i fork's per-class
+ * `default_settings.json` templates -- identical across all three classes there too.
  */
-constexpr std::array<StarterItem, 17> kStarterLoadout{{
+constexpr std::array<StarterItem, 10> kSharedStarterItems{{
     {authored_inventory::EquipmentSlot::kinetic, 3843477312U, 106},
     {authored_inventory::EquipmentSlot::energy, 1096206669U, 106},
     {authored_inventory::EquipmentSlot::heavy, 1864563948U, 106},
-    {authored_inventory::EquipmentSlot::helmet, 4070132608U, 106},
-    {authored_inventory::EquipmentSlot::gauntlets, 1636205905U, 106},
-    {authored_inventory::EquipmentSlot::chest, 1863170823U, 106},
-    {authored_inventory::EquipmentSlot::legs, 193869520U, 106},
-    {authored_inventory::EquipmentSlot::classItem, 3044599574U, 106},
     {authored_inventory::EquipmentSlot::ghost, 4135938409U, 0},
     {authored_inventory::EquipmentSlot::vehicle, 3317837688U, 0},
     {authored_inventory::EquipmentSlot::ship, 292872938U, 0},
-    {authored_inventory::EquipmentSlot::subclass, 3635991036U, 0},
     {authored_inventory::EquipmentSlot::clanBanner, 1460578929U, 0},
-    {authored_inventory::EquipmentSlot::emblem, 1907674138U, 0},
     {authored_inventory::EquipmentSlot::emote, 2038017661U, 0},
     {authored_inventory::EquipmentSlot::finisher, 152583919U, 0},
     {authored_inventory::EquipmentSlot::artifact, 1631206822U, 0},
 }};
 
 /**
- * Equips the fixed starter loadout, each item given a freshly allocated instance SOID instead of
- * a fixed one: the same 17 hashes are granted to every created character, so a literal SOID would
- * collide the moment more than one character has ever carried this loadout.
+ * The 7 equipment slots the real client renders per class: armor silhouette, the class item, the
+ * subclass (and the abilities/animations it drives), and the class-flavored emblem variant.
+ * Equipping another class's items here is exactly the "Hunter wearing Titan gear and subclass"
+ * mixup this build must not produce. Indexed by `CharacterClass`'s own wire value (titan=0,
+ * hunter=1, warlock=2). Hashes copied from the T4tsuk3i fork's `default_settings.json`, which
+ * carries a real, in-game-verified template per class; cross-checked against this build's own
+ * default character (class hunter) for the slots the two sources share, which matched exactly.
+ */
+constexpr std::array<std::array<StarterItem, 7>, 3> kPerClassStarterItems{{
+    // titan
+    {{
+        {authored_inventory::EquipmentSlot::helmet, 0xECB479E4U, 106},
+        {authored_inventory::EquipmentSlot::gauntlets, 0xE98EBABDU, 106},
+        {authored_inventory::EquipmentSlot::chest, 0x542FC543U, 106},
+        {authored_inventory::EquipmentSlot::legs, 0xD2F64E86U, 106},
+        {authored_inventory::EquipmentSlot::classItem, 0x295F70BAU, 106},
+        {authored_inventory::EquipmentSlot::subclass, 0xB920CE9AU, 0},
+        {authored_inventory::EquipmentSlot::emblem, 0x71B4CC1BU, 0},
+    }},
+    // hunter
+    {{
+        {authored_inventory::EquipmentSlot::helmet, 0xF2994B80U, 106},
+        {authored_inventory::EquipmentSlot::gauntlets, 0x61868551U, 106},
+        {authored_inventory::EquipmentSlot::chest, 0x6F0DBB07U, 106},
+        {authored_inventory::EquipmentSlot::legs, 0x0B8E36D0U, 106},
+        {authored_inventory::EquipmentSlot::classItem, 0xB578E716U, 106},
+        {authored_inventory::EquipmentSlot::subclass, 0xD8B8D1FCU, 0},
+        {authored_inventory::EquipmentSlot::emblem, 0x71B4CC1AU, 0},
+    }},
+    // warlock
+    {{
+        {authored_inventory::EquipmentSlot::helmet, 0xEA042965U, 106},
+        {authored_inventory::EquipmentSlot::gauntlets, 0x188C5834U, 106},
+        {authored_inventory::EquipmentSlot::chest, 0xF8689C4CU, 106},
+        {authored_inventory::EquipmentSlot::legs, 0x083E04B6U, 106},
+        {authored_inventory::EquipmentSlot::classItem, 0x99446581U, 106},
+        {authored_inventory::EquipmentSlot::subclass, 0xCF88FEA5U, 0},
+        {authored_inventory::EquipmentSlot::emblem, 0x71B4CC19U, 0},
+    }},
+}};
+
+/**
+ * Equips the class-appropriate starter loadout, each item given a freshly allocated instance SOID
+ * instead of a fixed one: the same hashes are granted to every created character of a class, so a
+ * literal SOID would collide the moment more than one has ever carried this loadout.
  * @param account In-out account; scanned for collision-free SOIDs as each item is assigned one.
  *                Must already count `character` towards `characterCount`, so the scan sees this
  *                character's own items as they are assigned, not just prior characters.
- * @param character In-out character, already appended to account.characters and counted.
+ * @param character In-out character, already appended to account.characters and counted. Its
+ *                  `characterClass` selects which armor/class-item/subclass row is granted.
  * @return False when a fresh SOID could not be allocated; the character is left without a
  *         loadout, exactly as it started, rather than half-equipped.
  */
 [[nodiscard]] bool seed_starter_loadout(AccountState& account, CharacterState& character) noexcept {
+    const auto& perClass =
+        kPerClassStarterItems[static_cast<std::size_t>(character.characterClass)];
     std::int32_t maxMutationSerial = -1;
     std::int32_t serial = 0;
-    for (const StarterItem& starter : kStarterLoadout) {
+    const auto place = [&](const StarterItem& starter) noexcept {
         std::uint64_t freshSoid = 0;
         if (!runtime::detail::next_item_instance_soid(account, freshSoid)) {
-            character.equipment = {};
-            core::log::write(core::log::Channel::state,
-                             core::log::Level::warn,
-                             "ev=create_character stage=loadout result=fail reason=soid_exhausted");
             return false;
         }
         authored_inventory::Item item{};
@@ -83,6 +116,25 @@ constexpr std::array<StarterItem, 17> kStarterLoadout{{
         character.equipment.slots[static_cast<std::size_t>(starter.slot)] = item;
         maxMutationSerial = serial;
         ++serial;
+        return true;
+    };
+    for (const StarterItem& starter : kSharedStarterItems) {
+        if (!place(starter)) {
+            character.equipment = {};
+            core::log::write(core::log::Channel::state,
+                             core::log::Level::warn,
+                             "ev=create_character stage=loadout result=fail reason=soid_exhausted");
+            return false;
+        }
+    }
+    for (const StarterItem& starter : perClass) {
+        if (!place(starter)) {
+            character.equipment = {};
+            core::log::write(core::log::Channel::state,
+                             core::log::Level::warn,
+                             "ev=create_character stage=loadout result=fail reason=soid_exhausted");
+            return false;
+        }
     }
     character.nextInventorySerial = static_cast<std::uint32_t>(maxMutationSerial + 1);
     return true;
