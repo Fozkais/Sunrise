@@ -478,6 +478,8 @@ void publish_sign_in_time(std::uint64_t seconds) noexcept;
  * @param characterClass Character class (0=titan, 1=hunter, 2=warlock).
  * @param gender Character gender (0=male, 1=female).
  * @param race Character race (0=human, 1=awoken, 2=exo).
+ * @param appearanceHeader Authored appearance header captured from the creation request, in
+ *                        record byte order. Only meaningful beside the `race` it arrived with.
  * @param characterSoid Receives the SOID of the newly created character.
  * @return True when the character was created, the account still validates, and the write
  *         committed.
@@ -485,6 +487,7 @@ void publish_sign_in_time(std::uint64_t seconds) noexcept;
 [[nodiscard]] bool create_character(std::uint8_t characterClass,
                                     std::uint8_t gender,
                                     std::uint8_t race,
+                                    const AppearanceHeader& appearanceHeader,
                                     std::uint64_t& characterSoid) noexcept;
 
 /**

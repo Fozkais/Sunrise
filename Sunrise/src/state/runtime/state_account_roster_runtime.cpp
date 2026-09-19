@@ -145,6 +145,7 @@ constexpr std::array<std::array<StarterItem, 7>, 3> kPerClassStarterItems{{
 bool create_character(std::uint8_t characterClass,
                       std::uint8_t gender,
                       std::uint8_t race,
+                      const AppearanceHeader& appearanceHeader,
                       std::uint64_t& characterSoid) noexcept {
     characterSoid = 0;
     if (characterClass > static_cast<std::uint8_t>(CharacterClass::warlock)
@@ -210,6 +211,10 @@ bool create_character(std::uint8_t characterClass,
     character.race = static_cast<CharacterRace>(race);
     character.gender = static_cast<CharacterGender>(gender);
     character.characterClass = static_cast<CharacterClass>(characterClass);
+    // Captured from the creation request, so the character keeps the face the player built
+    // instead of the single fixed header every character used to share.
+    character.appearanceHeader = appearanceHeader;
+    character.appearanceHeaderValid = true;
 
     // Select the new character and deselect all others.
     for (std::size_t i = 0; i < candidate.characterCount; ++i) {

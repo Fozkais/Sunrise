@@ -278,8 +278,11 @@ bool process(const ServiceRoute& route,
             middleware::web_service::messages::opcode501::Request creation{};
             std::uint64_t characterSoid = 0;
             if (!middleware::web_service::messages::opcode501::parse_request(message, creation)
-                || !state::create_character(
-                    creation.characterClass, creation.gender, creation.race, characterSoid)) {
+                || !state::create_character(creation.characterClass,
+                                            creation.gender,
+                                            creation.race,
+                                            creation.appearanceHeader,
+                                            characterSoid)) {
                 core::log::write(core::log::Channel::server,
                                  core::log::Level::warn,
                                  "ev=ws501 stage=create result=fail");
