@@ -10,6 +10,7 @@
 #include "../../../../middleware/bap/activity_message/player_trigger_incident.h"
 #include "../../../../middleware/bap/activity_message/sense_update.h"
 #include "../../../../state/activity_sdk/runtime.h"
+#include "../../internal.h"
 #include "activity_message_route_internal.h"
 
 namespace sunrise::server::bap::encrypted::activity_message {
@@ -231,6 +232,18 @@ bool frame_only(const ActivityClientBinding& binding,
             input.hasPlayerTrigger = player_trigger_incident::decode(
                 std::span(parsedIncident.payload).first(parsedIncident.payloadLength),
                 input.playerTrigger);
+            // A public bubble's crossings reach the host the client joined for it, while the
+            // triggers were armed by the private activity that plays the bubble. The incident
+            // is delivered to that private link, whose script owns the trigger.
+            if (input.hasPlayerTrigger && binding.role == ActivityClientRole::publicTarget) {
+                std::size_t links = 0;
+                const Session* const source = unique_activity_link_locked(binding.source, links);
+                if (source != nullptr
+                    && source->activity.role == ActivityClientRole::privateCurrent) {
+                    input.binding = binding.source;
+                    input.sourceGeneration = source->activity.bindingGeneration;
+                }
+            }
         }
         if (parsedIncident.payloadLength == cinematic_incident::kPayloadBytes
             && cinematic_incident::signal_for_target(parsedIncident.primaryTarget,
