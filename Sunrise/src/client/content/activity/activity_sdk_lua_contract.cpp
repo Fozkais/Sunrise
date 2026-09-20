@@ -295,6 +295,10 @@ local EventKind = {
 ---@field generate_map fun(self: SunriseSlot, args: {record: integer?, seed: integer?, )lua"
             R"lua(mode: integer?, enabled: boolean?, anchors: table[]?, values: integer[]?, )lua"
             R"lua(reals: number[]?, state_key: integer?}): SunriseRequestKey
+---@field set_mission_effect fun(self: SunriseSlot, args: {filter: SunriseSlot?, )lua"
+            R"lua(enabled: boolean?, revision: integer?}): SunriseRequestKey
+---@field set_toggle fun(self: SunriseSlot, args: {state: integer?, )lua"
+            R"lua(target: SunriseSlot?}): SunriseRequestKey
 ---@field set_object_filter fun(self: SunriseSlot, args: {players: boolean?, )lua"
             R"lua(target: SunriseSlot?, inside: SunriseSlot?, )lua"
             R"lua(inside_any: SunriseSlot[]?}): SunriseRequestKey

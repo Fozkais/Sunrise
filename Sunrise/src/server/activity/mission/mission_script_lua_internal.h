@@ -207,6 +207,8 @@ void push_atom_kinds(lua_State* state);
 [[nodiscard]] int slot_bind_combatant_to_squad(lua_State* state);
 [[nodiscard]] int slot_set_darkness_zone(lua_State* state);
 [[nodiscard]] int slot_set_object_filter(lua_State* state);
+[[nodiscard]] int slot_set_mission_effect(lua_State* state);
+[[nodiscard]] int slot_set_toggle(lua_State* state);
 [[nodiscard]] int slot_generate_map(lua_State* state);
 [[nodiscard]] int slot_watch_damage(lua_State* state);
 [[nodiscard]] int slot_set_interactable_object(lua_State* state);

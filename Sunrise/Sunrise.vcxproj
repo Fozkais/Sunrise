@@ -2074,6 +2074,7 @@
     <ClInclude Include="src\middleware\bap\activity_message\interactable_object_auth.h" />
     <ClInclude Include="src\middleware\bap\activity_message\mission_auth_patch.h" />
     <ClInclude Include="src\middleware\bap\activity_message\mission_effect_auth.h" />
+    <ClInclude Include="src\middleware\bap\activity_message\toggle_auth.h" />
     <ClInclude Include="src\middleware\bap\activity_message\music_section_auth.h" />
     <ClInclude Include="src\middleware\bap\activity_message\roster_presence.h" />
     <ClInclude Include="src\middleware\bap\activity_message\scene_events_auth.h" />

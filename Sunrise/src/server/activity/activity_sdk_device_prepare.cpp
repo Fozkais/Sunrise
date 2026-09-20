@@ -11,6 +11,7 @@
 #include "../../middleware/bap/activity_message/scene_events_auth.h"
 #include "../../middleware/bap/activity_message/sensor_auth_update.h"
 #include "../../middleware/bap/activity_message/squad_objective_auth.h"
+#include "../../middleware/bap/activity_message/toggle_auth.h"
 #include "../../middleware/content/packages/tables/region_reader.h"
 #include "../../state/activity/runtime.h"
 #include "activity_sdk_device_internal.h"
@@ -456,6 +457,9 @@ prepare_slot(const sdk::BoundView& view, std::uint32_t slotRow, PreparedDevice& 
         || typed(message::mission_effect::kSlotType,
                  message::mission_effect::kComponentClass,
                  message::mission_effect::kSchema)
+        || typed(message::toggle_auth::kSlotType,
+                 message::toggle_auth::kComponentClass,
+                 message::toggle_auth::kSchema)
         || typed(message::music_section::kSlotType,
                  message::music_section::kComponentClass,
                  message::music_section::kSchema)

@@ -9,7 +9,8 @@
 #include "auth_fields.h"
 #include "scriptable_auth_body.h"
 
-// TODO: Map the hop-on predicate and spawn-entry host model before exposing a mission control.
+// Type-26 mission effect (hop-on). A new revision detaches the old effect, then the client
+// attaches the authored effect to the entities its type-34 filter selects; disabled removes it.
 
 namespace sunrise::middleware::bap::activity_message::mission_effect {
 
@@ -22,14 +23,19 @@ inline constexpr std::uint32_t kSchema = 0x8080954BU;
 inline constexpr std::size_t kBits = 186;
 inline constexpr std::size_t kBytes = 24;
 
-/** Encodes the existing constrained wire preset without asserting hop-on lifecycle semantics. */
+/**
+ * Encodes the effect body.
+ * @param filter Type-34 filter slot; ignored when disabled.
+ * @param revision Positive revision; a change re-attaches.
+ * @param written Receives kBytes.
+ */
 [[nodiscard]] inline bool encode(scriptable_auth::Type2LaneClientRef filter,
                                  bool enabled,
-                                 std::int32_t controlWord,
+                                 std::int32_t revision,
                                  std::span<std::byte> output,
                                  std::size_t& written) noexcept {
     written = 0;
-    if (controlWord <= 0 || output.size() < kBytes
+    if (revision <= 0 || output.size() < kBytes
         || (enabled
             && (filter.slotType != scriptable_auth::kType34SlotType || filter.slotIndex < 0))) {
         return false;
@@ -44,7 +50,7 @@ inline constexpr std::size_t kBytes = 24;
         {fields::kSigned32Bias, 32}, // signed zero
         {fields::kSigned32Bias, 32}, // signed zero
         {fields::kSigned32Bias, 32}, // signed zero
-        {static_cast<std::uint32_t>(controlWord) + fields::kSigned32Bias, 32},
+        {static_cast<std::uint32_t>(revision) + fields::kSigned32Bias, 32},
     }};
     return fields::write_fields(writer, head)
            && writer.write(filter.registryKey, fields::kClientRefKeyWidth)
