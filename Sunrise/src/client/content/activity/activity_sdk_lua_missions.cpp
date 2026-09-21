@@ -14,6 +14,7 @@
 
 #include "../../../middleware/bap/activity_message/auth_schema_catalog.h"
 #include "../../../state/activity_sdk/runtime.h"
+#include "../../../state/activity_sdk/scene_triggers.h"
 #include "activity_sdk_lua_missions_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::lua_artifacts::internal {

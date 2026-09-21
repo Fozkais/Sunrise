@@ -198,11 +198,20 @@ constexpr std::uint32_t kAbilityTargetComponentClass = 0x80807D9BU;
         }
         priorGroup = &row;
     }
+    const format::DialogueCueText* priorText = nullptr;
     for (const format::DialogueCueText& row : catalog.dialogue_cue_texts()) {
+        // Slot, cue, line then take order, without repeats, backs the per-cue range lookup.
         if (row.slotIndex >= slots.size() || row.containerTag == 0 || row.stringHash == 0
-            || row.takeIndex >= format::kDialogueTakeCount) {
+            || row.takeIndex >= format::kDialogueTakeCount
+            || (priorText != nullptr
+                && std::tie(row.slotIndex, row.cueIndex, row.lineIndex, row.takeIndex)
+                       <= std::tie(priorText->slotIndex,
+                                   priorText->cueIndex,
+                                   priorText->lineIndex,
+                                   priorText->takeIndex))) {
             return false;
         }
+        priorText = &row;
         const auto cues = slot_dialogue_cues(catalog, slots[row.slotIndex]);
         if (row.cueIndex >= cues.size()) {
             return false;
@@ -681,14 +690,17 @@ bool relations(const Catalog& catalog) {
         bool (*run)(const Catalog&) noexcept;
     };
     // Every relation check a catalog must pass, named so a refusal reports which one failed.
-    static constexpr std::array<Check, 8> kChecks{{{"task_targets", &task_targets},
-                                                   {"dialogue_cues", &dialogue_cues},
-                                                   {"authored_text", &authored_text},
-                                                   {"behavior_edges", &behavior_edges},
-                                                   {"actor_semantics", &actor_semantics},
-                                                   {"runtime_semantics", &runtime_semantics},
-                                                   {"sobject_semantics", &sobject_semantics},
-                                                   {"entity_types", &entity_types}}};
+    static constexpr std::array<Check, 10> kChecks{
+        {{"authored_scene_event_keys", &authored_scene_event_keys},
+         {"squad_profiles", &squad_profiles},
+         {"task_targets", &task_targets},
+         {"dialogue_cues", &dialogue_cues},
+         {"authored_text", &authored_text},
+         {"behavior_edges", &behavior_edges},
+         {"actor_semantics", &actor_semantics},
+         {"runtime_semantics", &runtime_semantics},
+         {"sobject_semantics", &sobject_semantics},
+         {"entity_types", &entity_types}}};
     for (const Check& check : kChecks) {
         if (!check.run(catalog)) {
             remember(check.name);

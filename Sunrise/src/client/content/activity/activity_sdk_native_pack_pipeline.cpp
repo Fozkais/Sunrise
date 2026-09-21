@@ -214,6 +214,7 @@ lua_source(const state::activity_sdk::identity::Expected& identity,
             worldSources,
             storage.combatObjectiveGroups,
             storage.actorAbilities,
+            storage.authoredSceneEventKeys,
             storage.dialogueCues};
 }
 

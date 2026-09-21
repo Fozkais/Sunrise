@@ -20,7 +20,7 @@ struct RowSpec final {
 };
 
 /** Every StringRef field declared by the row table below. */
-constexpr std::size_t kDecodedStringFieldCount = 55;
+constexpr std::size_t kDecodedStringFieldCount = 56;
 /** Section index of the activity-owned binding-tag rows, which have no direct collection. */
 constexpr std::uint32_t kBindingTagSectionIndex = 24;
 /** Section index of the binding-locator rows, projected both directly and per activity. */
