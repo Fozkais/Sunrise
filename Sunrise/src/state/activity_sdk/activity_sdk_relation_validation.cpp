@@ -145,11 +145,20 @@ constexpr std::uint32_t kAbilityTargetComponentClass = 0x80807D9BU;
         }
         priorGroup = &row;
     }
+    const format::DialogueCueText* priorText = nullptr;
     for (const format::DialogueCueText& row : catalog.dialogue_cue_texts()) {
+        // Slot, cue, line then take order, without repeats, backs the per-cue range lookup.
         if (row.slotIndex >= slots.size() || row.containerTag == 0 || row.stringHash == 0
-            || row.takeIndex >= format::kDialogueTakeCount) {
+            || row.takeIndex >= format::kDialogueTakeCount
+            || (priorText != nullptr
+                && std::tie(row.slotIndex, row.cueIndex, row.lineIndex, row.takeIndex)
+                       <= std::tie(priorText->slotIndex,
+                                   priorText->cueIndex,
+                                   priorText->lineIndex,
+                                   priorText->takeIndex))) {
             return false;
         }
+        priorText = &row;
         const auto cues = slot_dialogue_cues(catalog, slots[row.slotIndex]);
         if (row.cueIndex >= cues.size()) {
             return false;

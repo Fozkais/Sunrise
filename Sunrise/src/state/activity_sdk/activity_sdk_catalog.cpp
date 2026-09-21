@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cmath>
 #include <limits>
+#include <utility>
 
 #include "internal.h"
 #include "runtime.h"
@@ -786,6 +787,28 @@ std::span<const format::DialogueCue> slot_dialogue_cues(const Catalog& catalog,
     const auto last =
         std::upper_bound(first, values.end(), slotIndex, [](auto index, const auto& row) {
             return index < row.slotIndex;
+        });
+    return values.subspan(static_cast<std::size_t>(first - values.begin()),
+                          static_cast<std::size_t>(last - first));
+}
+
+/** Relies on slot, cue, line then take ordering to return one contiguous zero-copy line range. */
+std::span<const format::DialogueCueText> cue_dialogue_texts(const Catalog& catalog,
+                                                            const format::Slot& slot,
+                                                            std::uint32_t cueIndex) noexcept {
+    const auto slots = catalog.slots();
+    if (!owns(slots, slot)) {
+        return {};
+    }
+    const auto values = catalog.dialogue_cue_texts();
+    const auto key = std::make_pair(static_cast<std::uint32_t>(&slot - slots.data()), cueIndex);
+    const auto first =
+        std::lower_bound(values.begin(), values.end(), key, [](const auto& row, const auto& cue) {
+            return std::make_pair(row.slotIndex, row.cueIndex) < cue;
+        });
+    const auto last =
+        std::upper_bound(first, values.end(), key, [](const auto& cue, const auto& row) {
+            return cue < std::make_pair(row.slotIndex, row.cueIndex);
         });
     return values.subspan(static_cast<std::size_t>(first - values.begin()),
                           static_cast<std::size_t>(last - first));
