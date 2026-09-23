@@ -69,9 +69,9 @@ struct Modifier {
 struct Entry {
     std::uint16_t itemIndex{kAbsent};
     std::uint16_t poolIndex{kAbsent};
+    std::uint16_t mappingIndex{kAbsent};
     std::uint32_t quantity{};
     std::uint32_t categoryHash{};
-    std::uint32_t bucketHash{};
     float weight{};
     Range condition{};
     Range modifiers{};

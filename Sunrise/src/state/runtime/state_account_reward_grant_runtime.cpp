@@ -377,7 +377,7 @@ bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
     return true;
 }
 
-/** Revalidates the native draw under the same lock that commits its inventory and flags. */
+/** Revalidates the prepared reward under the lock that commits its inventory and flags. */
 bool commit_season_pass_reward(PendingSeasonPassReward& mutation) noexcept {
     if (!mutation.prepared) {
         return false;

@@ -9,7 +9,7 @@
 
 namespace sunrise::middleware::content::packages::tables {
 
-/** Record and node field detection rejects values above 20 as non-expression data. */
+/** Upstream's record/node field heuristic; this is not the reward evaluator's opcode limit. */
 inline constexpr std::uint32_t kExpressionDetectionOpcodeCeiling = 20;
 
 /**

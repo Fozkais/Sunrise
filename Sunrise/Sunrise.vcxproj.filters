@@ -67,16 +67,4 @@
     <None Include="vendor\lua\README.md"><Filter>Vendor\Lua</Filter></None>
     <None Include="vendor\lua\UPSTREAM_README"><Filter>Vendor\Lua</Filter></None>
   </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="src\client\content\items\packages\package_reward_build.cpp" />
-    <ClInclude Include="src\client\content\items\packages\package_reward_build.h" />
-    <ClInclude Include="src\middleware\content\packages\tables\field_reader.h" />
-    <ClCompile Include="src\state\build_data\cache\records\cache_reward_records.cpp" />
-    <ClInclude Include="src\state\build_data\rewards\definition.h" />
-    <ClCompile Include="src\state\build_data\rewards\reward_catalog.cpp" />
-    <ClInclude Include="src\state\build_data\rewards\reward_catalog.h" />
-    <ClCompile Include="src\state\rewards\reward_resolver.cpp" />
-    <ClInclude Include="src\state\rewards\reward_resolver.h" />
-    <ClInclude Include="src\middleware\content\packages\tables\unlock_opcode.h" />
-  </ItemGroup>
 </Project>

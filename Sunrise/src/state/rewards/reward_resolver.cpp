@@ -225,6 +225,10 @@ struct Resolver {
         if (value == 0) {
             return true;
         }
+        // A mapping can accompany an item or nested pool; all effects belong to the grant.
+        if (entry.mappingIndex != definitions::kAbsent) {
+            return refuse(context, "reward_mapping");
+        }
         if (entry.poolIndex != definitions::kAbsent) {
             double total = 0;
             if (!pool_weight(entry.poolIndex, category, depth + 1, total)) {
@@ -238,7 +242,7 @@ struct Resolver {
                 return false;
             }
         } else {
-            return refuse(context, "reward_mapping");
+            return refuse(context, "reward_target");
         }
         output = value;
         return true;
@@ -266,10 +270,8 @@ struct Resolver {
         return std::isfinite(total);
     }
 
-    bool draw(std::uint16_t index,
-              std::uint32_t category,
-              std::size_t depth,
-              double total) noexcept {
+    bool
+    draw(std::uint16_t index, std::uint32_t category, std::size_t depth, double total) noexcept {
         const auto range = data.pools[index].entries;
         double remaining = fraction() * total;
         const definitions::Entry* chosen = nullptr;
@@ -291,6 +293,7 @@ struct Resolver {
             return refuse(context, "empty_pool");
         }
         if (chosen->poolIndex != definitions::kAbsent) {
+            // A pool reference selects one leaf; quantity belongs to that leaf.
             double childTotal = 0;
             return pool_weight(chosen->poolIndex, category, depth + 1, childTotal) && childTotal > 0
                    && draw(chosen->poolIndex, category, depth + 1, childTotal);

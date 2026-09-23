@@ -53,9 +53,9 @@ constexpr std::size_t kAcquiredFlagField = 0xDA;
 /** Byte offsets inside the serialized reward rows. */
 constexpr std::size_t kEntryQuantityOffset = 4;
 constexpr std::size_t kEntryPoolOffset = 8;
+constexpr std::size_t kEntryMappingOffset = 10;
 constexpr std::size_t kEntryCategoryOffset = 20;
 constexpr std::size_t kEntryWeightOffset = 24;
-constexpr std::size_t kEntryBucketOffset = 28;
 constexpr std::size_t kEntryConditionOffset = 32;
 constexpr std::size_t kEntryModifiersOffset = 48;
 constexpr std::size_t kEntrySocketsOffset = 64;
@@ -113,9 +113,9 @@ bool read_reward_entry(std::span<const std::byte> blob,
     return tables::read(blob, at, entry.itemIndex)
            && tables::read(blob, at + kEntryQuantityOffset, entry.quantity)
            && tables::read(blob, at + kEntryPoolOffset, entry.poolIndex)
+           && tables::read(blob, at + kEntryMappingOffset, entry.mappingIndex)
            && tables::read(blob, at + kEntryCategoryOffset, entry.categoryHash)
            && tables::read(blob, at + kEntryWeightOffset, entry.weight)
-           && tables::read(blob, at + kEntryBucketOffset, entry.bucketHash)
            && std::isfinite(entry.weight) && entry.weight >= 0;
 }
 
