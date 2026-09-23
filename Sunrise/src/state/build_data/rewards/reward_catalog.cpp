@@ -10,7 +10,7 @@
 #include "../../unlocks/definition.h"
 #include "../table.h"
 #include "core/threading/srw_lock.h"
-#include "middleware/content/packages/tables/definition_index_table.h"
+#include "middleware/content/packages/tables/unlock_opcode.h"
 
 namespace sunrise::state::build_data::rewards {
 namespace {
@@ -58,6 +58,23 @@ bool valid_depth(View data,
     }
     heights[index] = height;
     return true;
+}
+
+bool valid_entry(View data, const Entry& entry) noexcept {
+    return (entry.itemIndex == kAbsent || entry.itemIndex < data.items.size())
+           && (entry.poolIndex == kAbsent || entry.poolIndex < data.pools.size())
+           && fits(entry.condition, data.instructions) && fits(entry.modifiers, data.modifiers)
+           && fits(entry.sockets, data.sockets) && std::isfinite(entry.weight) && entry.weight >= 0;
+}
+
+bool valid_item(View data, const Item& item) noexcept {
+    if (item.definitionHash == 0) {
+        return item.poolIndex == kAbsent && item.acquiredFlag == kAbsent
+               && item.selectionCount == 0;
+    }
+    return item.selectionCount <= item.selections.size()
+           && (item.acquiredFlag == kAbsent || item.acquiredFlag < unlocks::kAccountFlagCapacity)
+           && (item.poolIndex == kAbsent || item.poolIndex < data.pools.size());
 }
 
 } // namespace
@@ -132,21 +149,12 @@ bool valid(View data) noexcept {
         }
     }
     for (const Entry& entry : data.entries) {
-        if ((entry.itemIndex != kAbsent && entry.itemIndex >= data.items.size())
-            || (entry.poolIndex != kAbsent && entry.poolIndex >= data.pools.size())
-            || !fits(entry.condition, data.instructions) || !fits(entry.modifiers, data.modifiers)
-            || !fits(entry.sockets, data.sockets) || !std::isfinite(entry.weight)
-            || entry.weight < 0) {
+        if (!valid_entry(data, entry)) {
             return false;
         }
     }
     for (const Item& item : data.items) {
-        if ((item.definitionHash == 0
-             && (item.poolIndex != kAbsent || item.acquiredFlag != kAbsent
-                 || item.selectionCount != 0))
-            || item.selectionCount > item.selections.size()
-            || (item.acquiredFlag != kAbsent && item.acquiredFlag >= unlocks::kAccountFlagCapacity)
-            || (item.poolIndex != kAbsent && item.poolIndex >= data.pools.size())) {
+        if (!valid_item(data, item)) {
             return false;
         }
     }

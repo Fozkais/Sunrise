@@ -13,6 +13,10 @@
 #include "../unlocks/definition.h"
 #include "state.h"
 
+namespace sunrise::state::unlocks {
+struct Table;
+}
+
 namespace sunrise::state::account::settings {
 
 struct SettingsDelta;

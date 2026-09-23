@@ -2,8 +2,8 @@
 
 #include "../../../../middleware/content/packages/reader/reader.h"
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
+#include "../../../../state/account/account_state.h"
 #include "../../../../state/build_data/rewards/definition.h"
-#include "state/account/account_state.h"
 
 namespace sunrise::client::content::items::packages {
 
@@ -62,12 +62,12 @@ private:
                                  std::span<const std::byte> blob,
                                  state::build_data::rewards::Item& item) noexcept;
     bool loaded_{};
-    std::vector<state::build_data::rewards::Pool> pools;
-    std::vector<state::build_data::rewards::Entry> entries;
-    std::vector<state::build_data::rewards::Item> items;
-    std::vector<state::build_data::rewards::Instruction> instructions;
-    std::vector<state::build_data::rewards::Modifier> modifiers;
-    std::vector<state::build_data::rewards::SocketOverride> sockets;
+    std::vector<state::build_data::rewards::Pool> pools_;
+    std::vector<state::build_data::rewards::Entry> entries_;
+    std::vector<state::build_data::rewards::Item> items_;
+    std::vector<state::build_data::rewards::Instruction> instructions_;
+    std::vector<state::build_data::rewards::Modifier> modifiers_;
+    std::vector<state::build_data::rewards::SocketOverride> sockets_;
 };
 
 /** Progression rewards and pool entries use the same socket-override layout. */

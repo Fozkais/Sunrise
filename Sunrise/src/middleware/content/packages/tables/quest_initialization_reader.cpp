@@ -2,6 +2,7 @@
 
 #include <limits>
 
+#include "../../../../state/build_data/inventory/buckets/definition.h"
 #include "definition_index_table.h"
 #include "internal.h"
 
@@ -196,7 +197,7 @@ Quest read_quest_initialization(std::span<const std::byte> definition,
         std::uint8_t parentBucket = 0;
         std::int64_t parentObjective = 0;
         if (parentIndex == itemIndex || !read(parent, kBucketIdOffset, parentBucket)
-            || parentBucket != kNonInventoryBucketId
+            || parentBucket != state::build_data::inventory::buckets::kNonInventoryBucketId
             || !read(parent, kItemObjectiveBlockOffset, parentObjective) || parentObjective != 0) {
             return {};
         }

@@ -2281,6 +2281,7 @@
     <ClCompile Include="src\client\hooks\network\investment\investment_socket_menu_routing.cpp" />
     <ClInclude Include="src\client\hooks\network\investment\socket_row_relocation.h" />
     <ClInclude Include="src\middleware\content\packages\tables\unlock_expression.h" />
+    <ClInclude Include="src\middleware\content\packages\tables\unlock_opcode.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode1801.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode1821.h" />
     <ClInclude Include="src\middleware\web_service\messages\opcode2400.h" />

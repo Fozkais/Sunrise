@@ -16,7 +16,6 @@
 #include "../rewards/reward_resolver.h"
 #include "../unlocks/unlocks_records.h"
 #include "../unlocks/unlocks_runtime.h"
-#include "middleware/content/packages/tables/definition_index_table.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
 #include "storage/internal.h"
@@ -28,6 +27,8 @@ namespace authored_inventory = account::inventory;
 namespace item_details = build_data::items::details;
 namespace inventory_buckets = build_data::inventory::buckets;
 namespace family4_loadout = middleware::datagen::family4::loadout;
+
+static_assert(build_data::rewards::kSocketsPerItem == item_details::kInitialPlugCapacity);
 
 namespace {
 
@@ -128,11 +129,24 @@ apply_reward_sockets(const item_details::Definition& detail,
         std::span(rows).first(resolved.count), kUnclaimedRecordIndex, mutation, refusal);
 }
 
+/** Wrappers and direct account perks bypass quest initialization. */
+bool uses_reward_definition(const build_data::items::Definition& item) noexcept {
+    build_data::rewards::Item reward{};
+    if (!build_data::rewards::find_item(item.definitionIndex, reward)) {
+        return false;
+    }
+    return reward.poolIndex != build_data::rewards::kAbsent
+           || (item.bucketId == inventory_buckets::kNonInventoryBucketId
+               && reward.acquiredFlag != build_data::rewards::kAbsent);
+}
+
+enum class PassResolution { claim, replay };
+
 [[nodiscard]] bool resolve_pass(const build_data::season_pass::Reward& reward,
                                 const AccountState& account,
                                 std::uint64_t seed,
                                 rewards::Result& result,
-                                bool replay = false,
+                                PassResolution resolution,
                                 const char** reason = nullptr) noexcept {
     const auto character = selected_character_index(account);
     unlocks::Table flags{};
@@ -147,7 +161,7 @@ apply_reward_sockets(const item_details::Definition& detail,
     if (reason != nullptr) {
         *reason = "reward_condition";
     }
-    if (replay && reward.claimFlagIndex < flags.accountFlags.size()) {
+    if (resolution == PassResolution::replay && reward.claimFlagIndex < flags.accountFlags.size()) {
         flags.accountFlags[reward.claimFlagIndex] = unlocks::kFlagClear;
     }
     bool enabled = false;
@@ -185,7 +199,8 @@ apply_reward_sockets(const item_details::Definition& detail,
     const auto* grant = &mutation.grant;
     rewards::Result expected{};
     if (!mutation.prepared || mutation.sourceDefinitionHash != reward.itemHash
-        || !resolve_pass(reward, account_snapshot(), mutation.seed, expected, true)
+        || !resolve_pass(
+            reward, account_snapshot(), mutation.seed, expected, PassResolution::replay)
         || expected.count != grant->rewardCount) {
         return false;
     }
@@ -252,7 +267,8 @@ bool prepare_season_pass_reward(std::uint16_t rewardIndex,
     std::memcpy(&mutation.seed, random.data(), random.size());
     rewards::Result resolved{};
     reason = "reward_condition";
-    if (!resolve_pass(reward, account_snapshot(), mutation.seed, resolved, false, &reason)) {
+    if (!resolve_pass(
+            reward, account_snapshot(), mutation.seed, resolved, PassResolution::claim, &reason)) {
         return false;
     }
     reason = "reward_placement";
@@ -268,14 +284,10 @@ bool prepare_season_pass_reward(std::uint16_t rewardIndex,
 
 ItemGrantRoute item_grant_route(std::uint16_t itemIndex) noexcept {
     build_data::items::Definition item{};
-    build_data::rewards::Item reward{};
     if (!build_data::find_item_definition_index(itemIndex, item)) {
         return ItemGrantRoute::unavailable;
     }
-    if (build_data::rewards::find_item(itemIndex, reward)
-        && (reward.poolIndex != build_data::rewards::kAbsent
-            || (item.bucketId == middleware::content::packages::tables::kNonInventoryBucketId
-                && reward.acquiredFlag != build_data::rewards::kAbsent))) {
+    if (uses_reward_definition(item)) {
         return ItemGrantRoute::reward;
     }
     if (item.questInitialization.scope != build_data::items::QuestInitialization::Scope::none) {
@@ -433,7 +445,7 @@ namespace {
         if (reward.kind == RecordRewardKind::accountUnlock) {
             build_data::rewards::Item source{};
             if (reward.quantity != 1 || reward.afterQuantity != 1 || reward.instanceSoid != 0
-                || item.bucketId != middleware::content::packages::tables::kNonInventoryBucketId
+                || item.bucketId != build_data::inventory::buckets::kNonInventoryBucketId
                 || !build_data::rewards::find_item(item.definitionIndex, source)
                 || source.acquiredFlag == build_data::rewards::kAbsent
                 || source.acquiredFlag != reward.acquiredFlag) {
@@ -564,7 +576,7 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
                 prepared.previousFlag = static_cast<std::uint8_t>(before);
             }
         }
-        if (item.bucketId == middleware::content::packages::tables::kNonInventoryBucketId) {
+        if (item.bucketId == build_data::inventory::buckets::kNonInventoryBucketId) {
             reason = "perk_acquisition";
             if (prepared.acquiredFlag == build_data::rewards::kAbsent || requested.quantity != 1
                 || !requested.sockets.empty()) {

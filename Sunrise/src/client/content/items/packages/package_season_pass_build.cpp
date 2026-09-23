@@ -29,7 +29,8 @@ bool read_season_reward(Storage& storage,
             progressionTable, at + tables::kProgressionRewardQuantityOffset, reward.quantity)
         || !tables::read(
             progressionTable, at + tables::kProgressionRewardClaimSlotOffset, claimSlot)
-        || reward.quantity == 0 || reward.quantity > INT32_MAX
+        || reward.quantity == 0
+        || reward.quantity > static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())
         || rank > (std::numeric_limits<std::uint8_t>::max)()
         || itemIndex > (std::numeric_limits<std::uint16_t>::max)()
         || claimSlot > (std::numeric_limits<std::uint16_t>::max)()
