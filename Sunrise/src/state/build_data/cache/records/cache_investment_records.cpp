@@ -98,6 +98,22 @@ bool encode(const season_pass::Reward& value, SeasonPassRewardRecord& record) no
     record.itemIndex = value.itemIndex;
     record.claimFlagIndex = value.claimFlagIndex;
     record.requiredRank = value.requiredRank;
+    record.socketCount = value.socketCount;
+    record.conditionCount = value.conditionCount;
+    if (record.conditionCount > record.condition.size()
+        || record.socketCount > record.sockets.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < record.condition.size(); ++i) {
+        if (!encode(value.condition[i], record.condition[i])) {
+            return false;
+        }
+    }
+    for (std::size_t i = 0; i < record.sockets.size(); ++i) {
+        if (!encode(value.sockets[i], record.sockets[i])) {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -112,30 +128,24 @@ bool decode(const SeasonPassRewardRecord& record, season_pass::Reward& value) no
     value.itemIndex = record.itemIndex;
     value.claimFlagIndex = record.claimFlagIndex;
     value.requiredRank = record.requiredRank;
-    return true;
-}
-
-/** Encodes one season pass wrapper with its unused item slots zeroed. */
-bool encode(const season_pass::Package& value, SeasonPassPackageRecord& record) noexcept {
-    if (value.itemCount > value.items.size()) {
+    value.socketCount = record.socketCount;
+    value.conditionCount = record.conditionCount;
+    if (value.conditionCount > value.condition.size()) {
         return false;
     }
-    record = {};
-    record.definitionHash = value.definitionHash;
-    record.items = value.items;
-    record.itemCount = value.itemCount;
-    return true;
-}
-
-/** Decodes one season pass wrapper after checking its padding and item count. */
-bool decode(const SeasonPassPackageRecord& record, season_pass::Package& value) noexcept {
-    value = {};
-    if (record.reserved != decltype(record.reserved){} || record.itemCount > record.items.size()) {
+    for (std::size_t i = 0; i < value.condition.size(); ++i) {
+        if (!decode(record.condition[i], value.condition[i])) {
+            return false;
+        }
+    }
+    if (value.socketCount > value.sockets.size()) {
         return false;
     }
-    value.definitionHash = record.definitionHash;
-    value.items = record.items;
-    value.itemCount = record.itemCount;
+    for (std::size_t i = 0; i < value.sockets.size(); ++i) {
+        if (!decode(record.sockets[i], value.sockets[i])) {
+            return false;
+        }
+    }
     return true;
 }
 

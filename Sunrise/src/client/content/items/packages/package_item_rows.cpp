@@ -4,6 +4,7 @@
 #include "../../../../middleware/content/packages/tables/quest_initialization_reader.h"
 #include "../../../../state/build_data/items/catalysts/exotic_catalyst_builder.h"
 #include "../../../../state/build_data/items/details/item_detail_catalog.h"
+#include "../../../../state/build_data/rewards/reward_catalog.h"
 #include "../../../../state/build_data/runtime.h"
 #include "internal.h"
 #include "package_socket_plug_build.h"
@@ -61,6 +62,9 @@ bool build_item_rows(const reader::Source& source,
                      const tables::Array& table,
                      std::size_t& rowCount,
                      const char*& reason) noexcept {
+    const bool needRewards = !state::build_data::rewards::ready();
+    const bool rewardStorageReady =
+        !needRewards || storage.rewardBuild.begin_items(static_cast<std::size_t>(table.count));
     const bool needDefinitions = !state::build_data::item_definitions_ready();
     const bool needDetails = !state::build_data::configured_item_details_ready();
     const bool needSocketPlugs = !state::build_data::socket_plug_rules_ready();
@@ -71,7 +75,7 @@ bool build_item_rows(const reader::Source& source,
     const bool needDetailRows = needDetails || needSocketRows;
     // Bucket equipment slots are derived from this same complete item walk, so a partial retry
     // must still revisit the table even when definitions and detail domains already published.
-    const bool needRows = needDefinitions || needDetailRows || needBuckets;
+    const bool needRows = needDefinitions || needDetailRows || needBuckets || needRewards;
     bool published = !needRows;
     if (retainDetails && storage.details.size() != kDetailCapacity) {
         storage.details.assign(kDetailCapacity, build_details::Definition{});
@@ -111,6 +115,9 @@ bool build_item_rows(const reader::Source& source,
             || !tables::items::read_definition(std::span<const std::byte>{storage.definition},
                                                item)) {
             continue;
+        }
+        if (needRewards && rewardStorageReady && itemClass == tables::kItemDefinitionClass) {
+            storage.rewardBuild.item(item.definitionIndex, item.definitionHash, storage.definition);
         }
         const std::uint32_t plugCategoryHash =
             corrected_plug_category(item.definitionHash, item.plugCategoryHash);
@@ -159,6 +166,9 @@ bool build_item_rows(const reader::Source& source,
             request(item.definitionIndex, storage.detailRequests);
             append_initial_plugs(item, table.count, storage.detailRequests);
         }
+    }
+    if (needRewards && rewardStorageReady) {
+        (void)storage.rewardBuild.publish();
     }
     bool requestsFit = true;
     if (needRows) {

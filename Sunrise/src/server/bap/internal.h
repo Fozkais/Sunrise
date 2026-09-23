@@ -323,6 +323,9 @@ struct ReplicationEpochPublication {
     bool staged{};
 };
 
+/** Logs one refused reward stage with its native index and a specific reason. */
+void report_reward_refusal(const char* stage, std::uint16_t index, const char* reason) noexcept;
+
 /** Which inventory one world reward lands in. */
 enum class WorldRewardKind : std::uint8_t {
     item,

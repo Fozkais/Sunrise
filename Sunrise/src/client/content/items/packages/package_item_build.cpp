@@ -8,6 +8,7 @@
 #include "../../../../middleware/content/packages/reader/reader.h"
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
 #include "../../../../state/build_data/activities/activity_catalog.h"
+#include "../../../../state/build_data/rewards/reward_catalog.h"
 #include "../../../../state/build_data/runtime.h"
 #include "../../activity/activity_catalog_build.h"
 #include "../../activity/entity_position_profile_build.h"
@@ -17,6 +18,7 @@
 #include "../../vendors/vendor_build.h"
 #include "build.h"
 #include "internal.h"
+#include "package_reward_build.h"
 #include "package_socket_plug_build.h"
 
 namespace sunrise::client::content::items::packages {
@@ -34,7 +36,7 @@ namespace {
            && state::build_data::ability_buckets_ready()
            && state::build_data::socket_entry_buckets_ready()
            && state::build_data::progression_definitions_ready()
-           && state::build_data::season_pass_ready()
+           && state::build_data::season_pass_ready() && state::build_data::rewards::ready()
            && state::build_data::repeatable_bounties_ready()
            && state::build_data::record_definitions_ready()
            && state::build_data::node_definitions_ready()
@@ -126,7 +128,8 @@ bool build() noexcept {
             if (!state::build_data::item_definitions_ready()
                 || !state::build_data::record_definitions_ready()
                 || !state::build_data::node_definitions_ready()
-                || !state::build_data::season_pass_ready() || !exotic_catalysts_settled()) {
+                || !state::build_data::season_pass_ready() || !state::build_data::rewards::ready()
+                || !exotic_catalysts_settled()) {
                 reason = "unlock_maps";
                 if (!read_unlock_slot_maps(
                         source, storage, std::span<const std::byte>{storage.root})) {
@@ -184,11 +187,14 @@ bool build() noexcept {
                         std::span(storage.progressionSteps).first(storage.progressionStepCount));
                 }
             }
-            if (!state::build_data::season_pass_ready()
+            const bool rewardTables =
+                (!state::build_data::rewards::ready() || !state::build_data::season_pass_ready())
+                && storage.rewardBuild.load(
+                    source, storage.scratch, storage.root, storage.slotMaps);
+            if (rewardTables && !state::build_data::season_pass_ready()
                 && build_season_pass(source, storage, std::span<const std::byte>{storage.root})) {
                 (void)state::build_data::publish_season_pass(
-                    std::span(storage.seasonPassRewards).first(storage.seasonPassRewardCount),
-                    std::span(storage.seasonPassPackages).first(storage.seasonPassPackageCount));
+                    std::span(storage.seasonPassRewards).first(storage.seasonPassRewardCount));
             }
             // Records are read before nodes: a node's lore-book flag and its parent bar come
             // from the records it owns, so the record rows must already be in pass storage.

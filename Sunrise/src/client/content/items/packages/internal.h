@@ -24,6 +24,7 @@
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/build_data/season_pass/definition.h"
 #include "../../../../state/build_data/sobjects/sobject_catalog.h"
+#include "package_reward_build.h"
 
 namespace sunrise::client::content::items::packages {
 
@@ -70,9 +71,10 @@ static_assert(kUnmappedSlot
 /** Bank index per unlock slot, indexed by slot. The first mapping row of a slot wins. */
 using SlotMap = std::array<std::uint16_t, kSlotSpace>;
 
-/** The four maps one root's two unlock mapping tables carry. 256 KiB together. */
+/** Saved-bank indices resolved from the root's flag and value mapping tables. */
 struct SlotMaps {
     SlotMap accountFlag{};
+    SlotMap profileFlag{};
     SlotMap characterFlag{};
     SlotMap accountValue{};
     SlotMap characterValue{};
@@ -83,6 +85,7 @@ struct Storage {
     reader::Scratch scratch{};
     /** Read once per root. Every domain resolves its unlock slots through these. */
     SlotMaps slotMaps{};
+    RewardBuild rewardBuild{};
     /** Node rows held until the value slot and owned records are resolved. */
     std::array<state::build_data::nodes::Definition, state::build_data::nodes::kDefinitionCapacity>
         nodeRows{};
@@ -157,11 +160,7 @@ struct Storage {
     std::array<state::build_data::season_pass::Reward,
                state::build_data::season_pass::kRewardCapacity>
         seasonPassRewards{};
-    std::array<state::build_data::season_pass::Package,
-               state::build_data::season_pass::kPackageCapacity>
-        seasonPassPackages{};
     std::size_t seasonPassRewardCount{};
-    std::size_t seasonPassPackageCount{};
     /** Repeatable bounty rows, keyed by the item-type pair their pool shares. */
     std::array<state::build_data::bounties::Definition,
                state::build_data::bounties::kDefinitionCapacity>

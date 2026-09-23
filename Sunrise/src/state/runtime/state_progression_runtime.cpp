@@ -8,14 +8,20 @@
 #include <limits>
 #include <span>
 
+#include "../build_data/rewards/reward_catalog.h"
 #include "../build_data/runtime.h"
+#include "../build_data/season_pass/season_pass_catalog.h"
 #include "../investment/investment.h"
 #include "../investment/store_internal.h"
 #include "../progression/season_pass_reward_catalog.h"
+#include "../rewards/reward_resolver.h"
 #include "../unlocks/definition.h"
 #include "../unlocks/unlocks_runtime.h"
+#include "core/logging/log.h"
+#include "middleware/content/packages/tables/definition_index_table.h"
 #include "runtime.h"
 #include "state.h"
+#include "state_account_transaction_helpers.h"
 #include "storage/internal.h"
 
 namespace sunrise::state {
@@ -244,6 +250,79 @@ bool publish_artifact_character_banks(CharacterArtifactWrite& write) noexcept {
     return publish_artifact_character_banks(write);
 }
 
+void report_perk_refusal(std::size_t index, const char* reason) noexcept {
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::warn,
+                      "ev=season_xp stage=automatic_perk index=%zu result=skip reason=%s",
+                      index,
+                      reason);
+}
+
+/** Earned perks set both flags in the transaction that publishes their qualifying rank. */
+bool grant_progress_flags() noexcept {
+    if (!build_data::season_pass_ready() || !build_data::rewards::ready()
+        || !build_data::item_definitions_ready()) {
+        return true;
+    }
+    AccountState account;
+    if (!investment::store::read_account(account)) {
+        return false;
+    }
+    const auto character = runtime::detail::selected_character_index(account);
+    if (character >= account.characterCount) {
+        return true;
+    }
+    unlocks::Table flags{};
+    if (!investment::store::read_unlocks(flags, static_cast<int>(character))) {
+        return false;
+    }
+    const auto rank = seasonal_rank();
+    const auto count = build_data::season_pass::count();
+    for (std::size_t index = 0; index < count; ++index) {
+        build_data::season_pass::Reward reward{};
+        if (!build_data::find_season_pass_reward(static_cast<std::uint16_t>(index), reward)) {
+            continue;
+        }
+        if (reward.requiredRank > rank) {
+            continue;
+        }
+        const auto acquired = pass::progress_flag(reward);
+        if (acquired == build_data::rewards::kAbsent) {
+            continue;
+        }
+        const auto claim = reward.claimFlagIndex;
+        if (acquired >= flags.accountFlags.size() || reward.quantity != 1 || reward.socketCount != 0
+            || reward.conditionCount > reward.condition.size()
+            || (claim != build_data::season_pass::kUnavailableFlagIndex
+                && claim >= flags.accountFlags.size())) {
+            report_perk_refusal(index, "perk_shape");
+            continue;
+        }
+        const char* reason = nullptr;
+        bool eligible = false;
+        if (!rewards::eligible(std::span(reward.condition).first(reward.conditionCount),
+                               {flags, account.characters[character].characterClass, 0, &reason},
+                               eligible)) {
+            report_perk_refusal(index, reason != nullptr ? reason : "perk_condition");
+            continue;
+        }
+        if (!eligible) {
+            continue;
+        }
+        for (const auto flag : {acquired, claim}) {
+            if (flag == build_data::rewards::kAbsent
+                || flags.accountFlags[flag] == unlocks::kFlagSet) {
+                continue;
+            }
+            if (!unlocks::set_account_flag(flag, unlocks::kFlagSet)) {
+                return false;
+            }
+            flags.accountFlags[flag] = unlocks::kFlagSet;
+        }
+    }
+    return true;
+}
+
 /** Publishes the four seasonal progression lanes the current XP total implies. */
 bool publish_experience_lanes(std::int32_t experience) noexcept {
     return unlocks::set_account_progression(kArtifactPowerProgressionIndex, experience)
@@ -257,6 +336,23 @@ bool publish_experience_lanes(std::int32_t experience) noexcept {
 }
 
 } // namespace
+
+// Packages share the perk bucket; only rewards without a pool grant the flag directly.
+std::uint16_t
+progression::season_pass::progress_flag(const build_data::season_pass::Reward& reward) noexcept {
+    namespace rewards = build_data::rewards;
+    build_data::items::Definition item{};
+    rewards::Item acquisition{};
+    if (build_data::find_item_definition_index(reward.itemIndex, item)
+        && item.definitionHash == reward.itemHash
+        && item.bucketId == middleware::content::packages::tables::kNonInventoryBucketId
+        && rewards::find_item(reward.itemIndex, acquisition)
+        && acquisition.definitionHash == reward.itemHash
+        && acquisition.poolIndex == rewards::kAbsent) {
+        return acquisition.acquiredFlag;
+    }
+    return rewards::kAbsent;
+}
 
 /** @return Seasonal XP published in the account progression bank. */
 std::int32_t seasonal_experience() noexcept {
@@ -303,7 +399,8 @@ bool seed_seasonal_progression() noexcept {
     const std::uint32_t mask = artifact_mask(rows, count);
     const bool published = publish_experience_lanes(experience)
                            && publish_artifact_locked(family, mask, experience)
-                           && investment::store::write_family5(family) && transaction.commit();
+                           && investment::store::write_family5(family) && grant_progress_flags()
+                           && transaction.commit();
     investment::store::g_mutex.unlock();
     return published;
 }
@@ -331,7 +428,7 @@ std::uint16_t artifact_power_bonus() noexcept {
     return bonus > 0 ? static_cast<std::uint16_t>(bonus) : 0U;
 }
 
-/** Adds base XP to the seasonal lanes and republishes every value derived from the total. */
+/** Publishes seasonal XP, artifact progress and newly earned acquisition flags atomically. */
 bool grant_seasonal_experience(std::int32_t amount) noexcept {
     if (amount <= 0) {
         return false;
@@ -341,22 +438,21 @@ bool grant_seasonal_experience(std::int32_t amount) noexcept {
         return false;
     }
     const std::int32_t previous = seasonal_experience();
-    if (previous > (std::numeric_limits<std::int32_t>::max)() - amount) {
+    if (previous < 0 || amount > (std::numeric_limits<std::int32_t>::max)() - previous) {
         return false;
     }
-    const std::int32_t total = previous + amount;
+    const auto total = previous + amount;
 
     Family5State family;
-    if (!transaction.ready() || !investment::store::read_family5(family)) {
+    if (!investment::store::read_family5(family)) {
         return false;
     }
     SaleRows rows{};
     std::size_t count = 0;
     const std::uint32_t mask = sale_rows(rows, count) ? artifact_mask(rows, count) : 0U;
-    const bool saved = publish_experience_lanes(total)
-                       && publish_artifact_locked(family, mask, total)
-                       && investment::store::write_family5(family) && transaction.commit();
-    return saved;
+    return publish_experience_lanes(total) && publish_artifact_locked(family, mask, total)
+           && investment::store::write_family5(family) && grant_progress_flags()
+           && transaction.commit();
 }
 
 /** @return True when this Season pass reward row is already claimed. */

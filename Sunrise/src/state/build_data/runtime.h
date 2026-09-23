@@ -23,6 +23,7 @@
 #include "nodes/definition.h"
 #include "progressions/definition.h"
 #include "records/definition.h"
+#include "rewards/definition.h"
 #include "scenarios/definition.h"
 #include "season_pass/definition.h"
 #include "sobjects/sobject_catalog.h"
@@ -397,13 +398,11 @@ publish_progression_definitions(std::span<const progressions::Definition> defini
 [[nodiscard]] bool season_pass_ready() noexcept;
 
 /**
- * Publishes the season pass reward list and the wrapper items it grants, in one step.
+ * Publishes the season pass reward list with its fixed socket overrides.
  * @param rewards Complete reward rows in native reward order.
- * @param packages Complete wrapper packages.
  * @return True when the rows pass the checks and any needed cache write succeeds.
  */
-[[nodiscard]] bool publish_season_pass(std::span<const season_pass::Reward> rewards,
-                                       std::span<const season_pass::Package> packages) noexcept;
+[[nodiscard]] bool publish_season_pass(std::span<const season_pass::Reward> rewards) noexcept;
 
 /**
  * Reads one season pass reward row.
@@ -413,15 +412,6 @@ publish_progression_definitions(std::span<const progressions::Definition> defini
  */
 [[nodiscard]] bool find_season_pass_reward(std::uint16_t rewardIndex,
                                            season_pass::Reward& reward) noexcept;
-
-/**
- * Finds the item set one season pass wrapper opens into.
- * @param definitionHash Authored wrapper item hash.
- * @param package Receives the wrapper and its items.
- * @return True when the catalog is ready and a wrapper carries that hash.
- */
-[[nodiscard]] bool find_season_pass_package(std::uint32_t definitionHash,
-                                            season_pass::Package& package) noexcept;
 
 /** @return True when the repeatable bounty table is in State. */
 [[nodiscard]] bool repeatable_bounties_ready() noexcept;
@@ -760,4 +750,6 @@ publish_vendor_catalog(std::span<const vendors::IndexEntry> index,
  */
 [[nodiscard]] bool persist() noexcept;
 
+/** Publishes a complete, validated reward graph. */
+[[nodiscard]] bool publish_reward_definitions(rewards::View definitions) noexcept;
 } // namespace sunrise::state::build_data

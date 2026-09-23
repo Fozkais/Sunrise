@@ -9,6 +9,9 @@
 
 namespace sunrise::middleware::content::packages::tables {
 
+/** Record and node field detection rejects values above 20 as non-expression data. */
+inline constexpr std::uint32_t kExpressionDetectionOpcodeCeiling = 20;
+
 /**
  * Reads the first operand of a given opcode out of one expression field.
  * The same field holds a value read on one row and a flag test on another, so the opcode is asked
@@ -51,7 +54,7 @@ namespace sunrise::middleware::content::packages::tables {
         const std::size_t at = base + static_cast<std::size_t>(index) * kUnlockInstructionStride;
         std::memcpy(&instruction, table.data() + at, sizeof instruction);
         std::memcpy(&operand, table.data() + at + kUnlockInstructionOperandOffset, sizeof operand);
-        if (instruction > kUnlockOpcodeCeiling) {
+        if (instruction > kExpressionDetectionOpcodeCeiling) {
             return false;
         }
         if (instruction == opcode && operand <= static_cast<std::uint32_t>(INT16_MAX)) {

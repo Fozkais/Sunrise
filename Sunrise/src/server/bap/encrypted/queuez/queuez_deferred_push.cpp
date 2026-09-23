@@ -2,15 +2,19 @@
 
 #include <algorithm>
 #include <limits>
+#include <memory>
+#include <new>
 
 #include "../../../../core/logging/log.h"
 #include "../../../../middleware/secure_channel/runtime.h"
 #include "../../../../state/account/account_state.h"
 #include "../../../../state/activity/destination/definition.h"
 #include "../../../../state/activity/runtime.h"
+#include "../../../../state/build_data/runtime.h"
 #include "../../../../state/runtime/runtime.h"
 #include "../internal.h"
 #include "../push/activity/activity_keepalive_push.h"
+#include "queuez_reward_staging.h"
 #include "queuez_state_validation.h"
 #include "state/investment/store_internal.h"
 
@@ -52,6 +56,63 @@ selected_character(const state::AccountState& account) noexcept {
     return nullptr;
 }
 
+bool consume_world_record_reward(const WorldRewardRequest& request,
+                                 Session& session,
+                                 Scratch& scratch,
+                                 std::span<std::byte> response,
+                                 std::size_t& written,
+                                 bool& touchesScratch) noexcept {
+    const std::unique_ptr<state::PendingRecordRewardGrant> pending(
+        new (std::nothrow) state::PendingRecordRewardGrant);
+    const auto fail = [&](const char* reason) noexcept {
+        report_reward_refusal("world_publish", request.itemDefinitionIndex, reason);
+        return false;
+    };
+    const char* reason = "transaction";
+    state::investment::store::Transaction transaction;
+    if (!pending || !transaction.ready() || request.quantity <= 0
+        || !state::prepare_item_reward(request.itemDefinitionIndex,
+                                       static_cast<std::uint32_t>(request.quantity),
+                                       *pending,
+                                       &reason)) {
+        return fail(reason);
+    }
+    queuez::RecordRewardGrant update{};
+    if (!queuez::stage_record_reward_grant(session.queuez, *pending, update)) {
+        return fail("inventory_stage");
+    }
+    touchesScratch = true;
+    std::size_t framedSize = 0;
+    if (!push::append_record_reward_notification(scratch,
+                                                 session.queuez,
+                                                 update,
+                                                 *pending,
+                                                 active_acquisition_presentation_rows(session),
+                                                 session.sessionKey,
+                                                 session.sendNonce,
+                                                 scratch.framed,
+                                                 framedSize)
+        || framedSize == 0) {
+        return fail("inventory_encode");
+    }
+    if (framedSize > response.size()) {
+        return false;
+    }
+    if (!state::commit_record_reward(*pending)) {
+        return fail("inventory_commit");
+    }
+    if (!bap::complete_world_reward(request.id) || !transaction.commit()) {
+        return fail("queue_commit");
+    }
+    std::copy_n(scratch.framed.begin(), framedSize, response.begin());
+    written = framedSize;
+    middleware::secure_channel::advance_nonce(session.sendNonce);
+    session.queuez = update.after;
+    bap::arm_account_resync_elsewhere(session);
+    bap::arm_acquisition_presentation_hold(session);
+    return true;
+}
+
 /** Publishes and commits one character-inventory world reward. */
 [[nodiscard]] bool consume_world_item_acquisition(const WorldRewardRequest& request,
                                                   Session& session,
@@ -59,6 +120,14 @@ selected_character(const state::AccountState& account) noexcept {
                                                   std::span<std::byte> response,
                                                   std::size_t& written,
                                                   bool& touchesScratch) noexcept {
+    state::build_data::items::Definition item{};
+    if (!state::build_data::find_item_definition_index(request.itemDefinitionIndex, item)) {
+        return false;
+    }
+    if (state::item_grant_route(request.itemDefinitionIndex) != state::ItemGrantRoute::quest) {
+        return consume_world_record_reward(
+            request, session, scratch, response, written, touchesScratch);
+    }
     state::investment::store::Transaction transaction;
     if (!transaction.ready()) {
         return false;

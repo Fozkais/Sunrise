@@ -28,6 +28,9 @@ inline constexpr std::uint16_t kAbsentPackageId = 0xFFFFU;
     return static_cast<std::uint16_t>((tag - kTagLowerBound) >> kTagPackageShift);
 }
 
+/** Hidden plugs, perks and quest roots use this bucket instead of held inventory. */
+inline constexpr std::uint8_t kNonInventoryBucketId = 37;
+
 /** Element class of the item index table inside the investment container. */
 inline constexpr std::uint32_t kItemIndexTableClass = 0x80807BE8U;
 /** Serialized item definition class, distinct from the item index table class. */
@@ -95,16 +98,58 @@ inline constexpr std::size_t kUnlockInstructionOperandOffset = 4;
 /** An expression field is a 64-bit count then a 64-bit self-relative offset. */
 inline constexpr std::size_t kUnlockExpressionFieldSize = 16;
 inline constexpr std::size_t kUnlockExpressionPointerOffset = 8;
-/** The evaluator's opcodes run to 27; anything wider means the field is not an expression. */
-inline constexpr std::uint32_t kUnlockOpcodeCeiling = 27;
+/** Native instruction values before unlock references are bound. */
+enum class UnlockOpcode : std::uint32_t {
+    flag = 1,
+    logicalNot = 2,
+    logicalOr = 3,
+    logicalAnd = 4,
+    logicalNor = 5,
+    notEqualAlternate = 6,
+    logicalNand = 7,
+    equal = 8,
+    notEqual = 9,
+    loadValue = 10,
+    constant = 11,
+    expression = 12,
+    greaterThan = 13,
+    greaterOrEqual = 14,
+    lessThan = 15,
+    lessOrEqual = 16,
+    add = 17,
+    subtract = 18,
+    multiply = 19,
+    divide = 20,
+    remainder = 21,
+    negate = 22,
+    hash = 23,
+    hashCombine = 24,
+    bitwiseAnd = 25,
+    bitwiseOr = 26,
+    bitwiseXor = 27,
+    bitwiseNot = 28,
+};
+
 /** The opcode that reads a value slot. */
-inline constexpr std::uint32_t kUnlockReadValueOpcode = 10;
+inline constexpr std::uint32_t kUnlockReadValueOpcode =
+    static_cast<std::uint32_t>(UnlockOpcode::loadValue);
 /** The opcode that tests a flag. */
-inline constexpr std::uint32_t kUnlockReadFlagOpcode = 1;
+inline constexpr std::uint32_t kUnlockReadFlagOpcode =
+    static_cast<std::uint32_t>(UnlockOpcode::flag);
 /** The opcode that pushes a literal. */
-inline constexpr std::uint32_t kUnlockLiteralOpcode = 11;
+inline constexpr std::uint32_t kUnlockLiteralOpcode =
+    static_cast<std::uint32_t>(UnlockOpcode::constant);
 /** The opcode that tests greater than or equal. */
-inline constexpr std::uint32_t kUnlockGreaterEqualOpcode = 14;
+inline constexpr std::uint32_t kUnlockGreaterEqualOpcode =
+    static_cast<std::uint32_t>(UnlockOpcode::greaterOrEqual);
+/** The opcode that inverts the value on top of the stack. Its operand is unused. */
+inline constexpr std::uint32_t kUnlockNotOpcode =
+    static_cast<std::uint32_t>(UnlockOpcode::logicalNot);
+/** The opcode that folds the top two values with logical and. */
+inline constexpr std::uint32_t kUnlockAndOpcode =
+    static_cast<std::uint32_t>(UnlockOpcode::logicalAnd);
+/** The opcode that tests the top two values for equality. */
+inline constexpr std::uint32_t kUnlockEqualOpcode = static_cast<std::uint32_t>(UnlockOpcode::equal);
 /** High half every installed array marker and element class carries. */
 inline constexpr std::uint32_t kDefinitionClassHigh = 0x8080U;
 /** Shift that leaves `kDefinitionClassHigh` from a marker or element class. */
@@ -123,6 +168,8 @@ inline constexpr std::size_t kNodeExpressionFieldAlternate = 48;
 /** Records a node owns, four bytes each as a row then a gate. */
 inline constexpr std::size_t kNodeChildRecordField = 136;
 inline constexpr std::size_t kNodeChildRecordStride = 4;
+/** Array descriptor of the account object's profile unlock flag mapping table. */
+inline constexpr std::size_t kProfileFlagMapDescriptor = 24;
 /** Array descriptor of the character object's flag mapping table, sized to that bank. */
 inline constexpr std::size_t kCharacterFlagMapDescriptor = 40;
 /** Array descriptor of the character object's value mapping table, sized to that bank. */
@@ -216,6 +263,9 @@ inline constexpr std::size_t kProgressionRewardItemIndexOffset = 4;
 inline constexpr std::size_t kProgressionRewardQuantityOffset = 8;
 /** Unlock flag slot a reward's claim sets. The slots run dense in reward order. */
 inline constexpr std::size_t kProgressionRewardClaimSlotOffset = 20;
+/** Eligibility expressions and socket overrides carried by one progression reward. */
+inline constexpr std::size_t kProgressionRewardConditionsOffset = 24;
+inline constexpr std::size_t kProgressionRewardSocketsOffset = 40;
 /** Items a wrapper item opens into, two bytes each as an item-definition index. */
 inline constexpr std::size_t kGearsetItemField = 392;
 inline constexpr std::uint32_t kGearsetItemRowClass = 0x808087DBU;
@@ -276,6 +326,13 @@ using RowVisitor = bool (*)(void* context, std::uint32_t index, const IndexRow& 
 [[nodiscard]] bool find_optional_array_at(std::span<const std::byte> blob,
                                           std::size_t descriptorOffset,
                                           Array& output) noexcept;
+
+/** Reads an optional typed array and checks every fixed-stride row lies in its blob. */
+[[nodiscard]] bool read_array(std::span<const std::byte> blob,
+                              std::size_t at,
+                              std::uint32_t elementClass,
+                              std::size_t stride,
+                              Array& rows) noexcept;
 
 /**
  * Finds the first array whose header names one element class.
