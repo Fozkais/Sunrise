@@ -18,10 +18,6 @@ bool commit_world_reward(const WorldRewardRequest& request) noexcept {
     }
     bool committed = false;
     if (request.kind == WorldRewardKind::item) {
-        state::build_data::items::Definition item{};
-        if (!state::build_data::find_item_definition_index(request.itemDefinitionIndex, item)) {
-            return false;
-        }
         if (state::item_grant_route(request.itemDefinitionIndex) == state::ItemGrantRoute::quest) {
             state::PendingItemAcquisition acquisition;
             committed = request.quantity == 1
@@ -31,11 +27,19 @@ bool commit_world_reward(const WorldRewardRequest& request) noexcept {
         } else {
             const std::unique_ptr<state::PendingRecordRewardGrant> grant(
                 new (std::nothrow) state::PendingRecordRewardGrant);
+            const char* reason = "reward_allocation";
             committed = grant && request.quantity > 0
                         && state::prepare_item_reward(request.itemDefinitionIndex,
                                                       static_cast<std::uint32_t>(request.quantity),
-                                                      *grant)
-                        && state::commit_record_reward(*grant);
+                                                      *grant,
+                                                      &reason);
+            if (committed) {
+                reason = "inventory_commit";
+                committed = state::commit_record_reward(*grant);
+            }
+            if (!committed) {
+                report_reward_refusal("world_settle", request.itemDefinitionIndex, reason);
+            }
         }
     } else {
         state::PendingProfileItemAcquisition acquisition;

@@ -78,31 +78,33 @@ bool consume_world_record_reward(const WorldRewardRequest& request,
         return fail(reason);
     }
     queuez::RecordRewardGrant update{};
-    if (!queuez::stage_record_reward_grant(session.queuez, *pending, update)) {
-        return fail("inventory_stage");
-    }
     touchesScratch = true;
     std::size_t framedSize = 0;
-    if (!push::append_record_reward_notification(scratch,
-                                                 session.queuez,
-                                                 update,
-                                                 *pending,
-                                                 active_acquisition_presentation_rows(session),
-                                                 session.sessionKey,
-                                                 session.sendNonce,
-                                                 scratch.framed,
-                                                 framedSize)
-        || framedSize == 0) {
-        return fail("inventory_encode");
-    }
-    if (framedSize > response.size()) {
-        return false;
-    }
+    const bool staged = queuez::stage_record_reward_grant(session.queuez, *pending, update);
+    const bool encoded =
+        staged
+        && push::append_record_reward_notification(scratch,
+                                                   session.queuez,
+                                                   update,
+                                                   *pending,
+                                                   active_acquisition_presentation_rows(session),
+                                                   session.sessionKey,
+                                                   session.sendNonce,
+                                                   scratch.framed,
+                                                   framedSize)
+        && framedSize != 0;
     if (!state::commit_record_reward(*pending)) {
         return fail("inventory_commit");
     }
     if (!bap::complete_world_reward(request.id) || !transaction.commit()) {
         return fail("queue_commit");
+    }
+    // A failed presentation still commits the prepared draw and retires its queue row.
+    if (!encoded || framedSize > response.size()) {
+        bap::arm_account_resync_everywhere();
+        return fail(!staged    ? "inventory_stage"
+                    : !encoded ? "inventory_encode"
+                               : "response_capacity");
     }
     std::copy_n(scratch.framed.begin(), framedSize, response.begin());
     written = framedSize;
@@ -120,10 +122,6 @@ bool consume_world_record_reward(const WorldRewardRequest& request,
                                                   std::span<std::byte> response,
                                                   std::size_t& written,
                                                   bool& touchesScratch) noexcept {
-    state::build_data::items::Definition item{};
-    if (!state::build_data::find_item_definition_index(request.itemDefinitionIndex, item)) {
-        return false;
-    }
     if (state::item_grant_route(request.itemDefinitionIndex) != state::ItemGrantRoute::quest) {
         return consume_world_record_reward(
             request, session, scratch, response, written, touchesScratch);
@@ -138,46 +136,43 @@ bool consume_world_record_reward(const WorldRewardRequest& request,
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=queuez stage=world_acquisition result=fail reason=prepare");
-        bap::settle_world_reward();
         return false;
     }
     touchesScratch = true;
     queuez::ItemAcquisition acquisition{};
-    if (!queuez::stage_item_acquisition(session.queuez,
-                                        pending.accountSoid,
-                                        pending.characterSoid,
-                                        pending.acquiredInstanceSoid,
-                                        pending.updates_account(),
-                                        acquisition)) {
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::warn,
-                         "ev=queuez stage=world_acquisition result=fail reason=stage");
-        bap::settle_world_reward();
-        return false;
-    }
+    const bool staged = queuez::stage_item_acquisition(session.queuez,
+                                                       pending.accountSoid,
+                                                       pending.characterSoid,
+                                                       pending.acquiredInstanceSoid,
+                                                       pending.updates_account(),
+                                                       acquisition);
     auto nextSendNonce = session.sendNonce;
     std::size_t framedSize = 0;
-    if (!push::append_item_acquisition_notification(scratch,
-                                                    acquisition,
-                                                    pending,
-                                                    active_acquisition_presentation_rows(session),
-                                                    session.sessionKey,
-                                                    nextSendNonce,
-                                                    scratch.framed,
-                                                    framedSize)
-        || framedSize == 0 || framedSize > response.size()) {
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::warn,
-                         "ev=queuez stage=world_acquisition result=fail reason=encode");
-        bap::settle_world_reward();
-        return false;
-    }
+    const bool encoded =
+        staged
+        && push::append_item_acquisition_notification(scratch,
+                                                      acquisition,
+                                                      pending,
+                                                      active_acquisition_presentation_rows(session),
+                                                      session.sessionKey,
+                                                      nextSendNonce,
+                                                      scratch.framed,
+                                                      framedSize)
+        && framedSize != 0;
     if (!state::commit_item_acquisition(pending) || !bap::complete_world_reward(request.id)
         || !transaction.commit()) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=queuez stage=world_acquisition result=fail reason=commit");
-        bap::settle_world_reward();
+        return false;
+    }
+    if (!encoded || framedSize > response.size()) {
+        bap::arm_account_resync_everywhere();
+        report_reward_refusal("world_acquisition",
+                              request.itemDefinitionIndex,
+                              !staged    ? "inventory_stage"
+                              : !encoded ? "inventory_encode"
+                                         : "response_capacity");
         return false;
     }
     std::copy_n(scratch.framed.begin(), framedSize, response.begin());
@@ -208,45 +203,41 @@ bool consume_world_record_reward(const WorldRewardRequest& request,
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=queuez stage=world_profile_acquisition result=fail reason=prepare");
-        bap::settle_world_reward();
         return false;
     }
     touchesScratch = true;
     queuez::ProfileItemAcquisition acquisition{};
-    if (!queuez::stage_profile_item_acquisition(session.queuez,
-                                                pending.accountSoid,
-                                                pending.acquiredInstanceSoid,
-                                                pending.actionSource,
-                                                pending.appended,
-                                                acquisition)) {
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::warn,
-                         "ev=queuez stage=world_profile_acquisition result=fail reason=stage");
-        bap::settle_world_reward();
-        return false;
-    }
+    const bool staged = queuez::stage_profile_item_acquisition(session.queuez,
+                                                               pending.accountSoid,
+                                                               pending.acquiredInstanceSoid,
+                                                               pending.actionSource,
+                                                               pending.appended,
+                                                               acquisition);
     auto nextSendNonce = session.sendNonce;
     std::size_t framedSize = 0;
-    if (!push::append_profile_item_acquisition_notification(scratch,
-                                                            acquisition,
-                                                            pending,
-                                                            session.sessionKey,
-                                                            nextSendNonce,
-                                                            scratch.framed,
-                                                            framedSize)
-        || framedSize == 0 || framedSize > response.size()) {
-        core::log::write(core::log::Channel::server,
-                         core::log::Level::warn,
-                         "ev=queuez stage=world_profile_acquisition result=fail reason=encode");
-        bap::settle_world_reward();
-        return false;
-    }
+    const bool encoded = staged
+                         && push::append_profile_item_acquisition_notification(scratch,
+                                                                               acquisition,
+                                                                               pending,
+                                                                               session.sessionKey,
+                                                                               nextSendNonce,
+                                                                               scratch.framed,
+                                                                               framedSize)
+                         && framedSize != 0;
     if (!state::commit_profile_item_acquisition(pending) || !bap::complete_world_reward(request.id)
         || !transaction.commit()) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=queuez stage=world_profile_acquisition result=fail reason=commit");
-        bap::settle_world_reward();
+        return false;
+    }
+    if (!encoded || framedSize > response.size()) {
+        bap::arm_account_resync_everywhere();
+        report_reward_refusal("world_profile_acquisition",
+                              request.itemDefinitionIndex,
+                              !staged    ? "inventory_stage"
+                              : !encoded ? "inventory_encode"
+                                         : "response_capacity");
         return false;
     }
     std::copy_n(scratch.framed.begin(), framedSize, response.begin());
@@ -758,6 +749,9 @@ bool consume_deferred(Session& session,
         }
         if (published) {
             return true;
+        }
+        if (session.accountResyncArmed) {
+            return false;
         }
     }
     if (consume_seasonal_experience_presentation(

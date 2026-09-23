@@ -5,13 +5,13 @@
 
 #include "../build_data/rewards/reward_catalog.h"
 #include "../build_data/runtime.h"
-#include "middleware/content/packages/tables/definition_index_table.h"
+#include "middleware/content/packages/tables/unlock_opcode.h"
 
 namespace sunrise::state::rewards {
 namespace {
 
 namespace definitions = build_data::rewards;
-/** The empty bucket tag inherits the enclosing pool's bucket constraint. */
+/** The empty category tag matches every wrapper selection. */
 constexpr std::uint32_t kEmptyTag = 0x811C9DC5U;
 /** Native postfix expressions use at most 256 signed 32-bit stack values. */
 constexpr std::size_t kExpressionCapacity = 256;
@@ -158,6 +158,8 @@ struct Resolver {
     Result& result;
     std::uint64_t random;
     Selection selection;
+    std::array<const definitions::Entry*, definitions::kGrantCapacity> selectedEntries{};
+    std::array<std::uint32_t, definitions::kGrantCapacity> selectedCategories{};
 
     double fraction() noexcept {
         // SplitMix64 makes a prepared seed replayable without shared random state.
@@ -171,14 +173,17 @@ struct Resolver {
 
     bool weight(const definitions::Entry& entry,
                 std::uint32_t category,
-                std::uint32_t bucket,
                 std::size_t depth,
                 double& output) noexcept {
         output = 0;
-        if (entry.categoryHash != category
-            || (bucket != kEmptyTag && entry.bucketHash != kEmptyTag
-                && entry.bucketHash != bucket)) {
+        if (entry.categoryHash != kEmptyTag && entry.categoryHash != category) {
             return true;
+        }
+        // Draws exclude the selected pool row within its category, not every copy of its item.
+        for (std::size_t i = 0; i < result.count; ++i) {
+            if (selectedEntries[i] == &entry && selectedCategories[i] == category) {
+                return true;
+            }
         }
         if (selection == Selection::equipment && entry.poolIndex == definitions::kAbsent) {
             build_data::items::details::Definition item{};
@@ -207,7 +212,11 @@ struct Resolver {
                 if (modifier.valueIndex != definitions::kAbsent) {
                     return refuse(context, "indexed_weight");
                 }
-                value = modifier.value;
+                // The first matching modifier replaces the weight; a negative value keeps it.
+                if (modifier.value >= 0) {
+                    value = modifier.value;
+                }
+                break;
             }
         }
         if (!std::isfinite(value) || value < 0) {
@@ -218,11 +227,7 @@ struct Resolver {
         }
         if (entry.poolIndex != definitions::kAbsent) {
             double total = 0;
-            if (!pool_weight(entry.poolIndex,
-                             category,
-                             entry.bucketHash == kEmptyTag ? bucket : entry.bucketHash,
-                             depth + 1,
-                             total)) {
+            if (!pool_weight(entry.poolIndex, category, depth + 1, total)) {
                 return false;
             }
             if (total == 0) {
@@ -231,11 +236,6 @@ struct Resolver {
         } else if (entry.itemIndex != definitions::kAbsent) {
             if (entry.itemIndex >= data.items.size()) {
                 return false;
-            }
-            for (std::size_t i = 0; i < result.count; ++i) {
-                if (result.grants[i].itemIndex == entry.itemIndex) {
-                    return true;
-                }
             }
         } else {
             return refuse(context, "reward_mapping");
@@ -246,7 +246,6 @@ struct Resolver {
 
     bool pool_weight(std::uint16_t index,
                      std::uint32_t category,
-                     std::uint32_t bucket,
                      std::size_t depth,
                      double& total) noexcept {
         total = 0;
@@ -259,7 +258,7 @@ struct Resolver {
         }
         for (const auto& entry : data.entries.subspan(range.first, range.count)) {
             double value = 0;
-            if (!weight(entry, category, bucket, depth, value)) {
+            if (!weight(entry, category, depth, value)) {
                 return false;
             }
             total += value;
@@ -269,7 +268,6 @@ struct Resolver {
 
     bool draw(std::uint16_t index,
               std::uint32_t category,
-              std::uint32_t bucket,
               std::size_t depth,
               double total) noexcept {
         const auto range = data.pools[index].entries;
@@ -277,7 +275,7 @@ struct Resolver {
         const definitions::Entry* chosen = nullptr;
         for (const auto& entry : data.entries.subspan(range.first, range.count)) {
             double value = 0;
-            if (!weight(entry, category, bucket, depth, value)) {
+            if (!weight(entry, category, depth, value)) {
                 return false;
             }
             if (value == 0) {
@@ -289,22 +287,21 @@ struct Resolver {
                 break;
             }
         }
-        if (chosen == nullptr
-            || (chosen->quantity != 1 && chosen->poolIndex != definitions::kAbsent)) {
-            return refuse(context, "nested_quantity");
+        if (chosen == nullptr) {
+            return refuse(context, "empty_pool");
         }
         if (chosen->poolIndex != definitions::kAbsent) {
-            const auto childBucket = chosen->bucketHash == kEmptyTag ? bucket : chosen->bucketHash;
             double childTotal = 0;
-            return pool_weight(chosen->poolIndex, category, childBucket, depth + 1, childTotal)
-                   && childTotal > 0
-                   && draw(chosen->poolIndex, category, childBucket, depth + 1, childTotal);
+            return pool_weight(chosen->poolIndex, category, depth + 1, childTotal) && childTotal > 0
+                   && draw(chosen->poolIndex, category, depth + 1, childTotal);
         }
         if (chosen->quantity == 0 || chosen->quantity > INT32_MAX
             || result.count == result.grants.size()
             || !definitions::fits(chosen->sockets, data.sockets)) {
             return false;
         }
+        selectedEntries[result.count] = chosen;
+        selectedCategories[result.count] = category;
         auto& grant = result.grants[result.count++];
         grant.itemIndex = chosen->itemIndex;
         grant.quantity = static_cast<std::int32_t>(chosen->quantity);
@@ -355,15 +352,14 @@ bool resolve_item(definitions::View data,
             }
             for (std::size_t j = 0; j < declared.count; ++j) {
                 double total = 0;
-                if (!resolver.pool_weight(
-                        item.poolIndex, declared.categoryHash, kEmptyTag, 0, total)) {
+                if (!resolver.pool_weight(item.poolIndex, declared.categoryHash, 0, total)) {
                     return false;
                 }
                 // A fixed bundle can have fewer eligible members after an acquisition unlock.
                 if (total == 0) {
                     break;
                 }
-                if (!resolver.draw(item.poolIndex, declared.categoryHash, kEmptyTag, 0, total)) {
+                if (!resolver.draw(item.poolIndex, declared.categoryHash, 0, total)) {
                     return false;
                 }
             }
