@@ -125,6 +125,7 @@ bool find_optional_array_at(std::span<const std::byte> blob,
     return resolve_descriptor(blob, descriptorOffset, true, output);
 }
 
+/** Reads an optional typed array and checks every fixed-stride row lies in its blob. */
 bool read_array(std::span<const std::byte> blob,
                 std::size_t at,
                 std::uint32_t elementClass,

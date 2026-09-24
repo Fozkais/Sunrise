@@ -2,6 +2,7 @@
 
 namespace sunrise::state::build_data::cache::records {
 
+/** Encodes one pool identity and its member range. */
 bool encode(const rewards::Pool& value, RewardPoolRecord& record) noexcept {
     record = {};
     record.definitionHash = value.definitionHash;
@@ -9,6 +10,7 @@ bool encode(const rewards::Pool& value, RewardPoolRecord& record) noexcept {
     return true;
 }
 
+/** Decodes one pool; the complete-domain validator checks its member range. */
 bool decode(const RewardPoolRecord& record, rewards::Pool& value) noexcept {
     value = {};
     value.definitionHash = record.definitionHash;
@@ -16,6 +18,7 @@ bool decode(const RewardPoolRecord& record, rewards::Pool& value) noexcept {
     return true;
 }
 
+/** Encodes one pool entry with its dependent bank ranges. */
 bool encode(const rewards::Entry& value, RewardEntryRecord& record) noexcept {
     record = {};
     record.itemIndex = value.itemIndex;
@@ -31,6 +34,7 @@ bool encode(const rewards::Entry& value, RewardEntryRecord& record) noexcept {
     return true;
 }
 
+/** Decodes one pool entry, refusing an absent-bank marker without a supplemental reference. */
 bool decode(const RewardEntryRecord& record, rewards::Entry& value) noexcept {
     value = {};
     if (record.supplementalMissing > 1
@@ -50,6 +54,7 @@ bool decode(const RewardEntryRecord& record, rewards::Entry& value) noexcept {
     return true;
 }
 
+/** Encodes one item's wrapper and acquisition flag. */
 bool encode(const rewards::Item& value, RewardItemRecord& record) noexcept {
     record = {};
     record.definitionHash = value.definitionHash;
@@ -63,6 +68,7 @@ bool encode(const rewards::Item& value, RewardItemRecord& record) noexcept {
     return true;
 }
 
+/** Decodes one item's wrapper; the complete-domain validator checks its references. */
 bool decode(const RewardItemRecord& record, rewards::Item& value) noexcept {
     value = {};
     value.definitionHash = record.definitionHash;
@@ -76,20 +82,27 @@ bool decode(const RewardItemRecord& record, rewards::Item& value) noexcept {
     return true;
 }
 
+/** Encodes one bound condition instruction. */
 bool encode(const rewards::Instruction& value, RewardInstructionRecord& record) noexcept {
     record = {};
-    record.opcode = value.opcode;
+    record.opcode = static_cast<std::uint8_t>(value.opcode);
+    record.bank = static_cast<std::uint8_t>(value.bank);
     record.operand = value.operand;
     return true;
 }
 
+/** Decodes one bound condition instruction, refusing an unknown opcode or bank. */
 bool decode(const RewardInstructionRecord& record, rewards::Instruction& value) noexcept {
     value = {};
-    value.opcode = record.opcode;
+    if (record.reserved != 0 || !unlocks::decode_opcode(record.opcode, value.opcode)) {
+        return false;
+    }
+    value.bank = static_cast<unlocks::Bank>(record.bank);
     value.operand = record.operand;
-    return true;
+    return unlocks::valid(value);
 }
 
+/** Encodes one conditional weight modifier. */
 bool encode(const rewards::Modifier& value, RewardModifierRecord& record) noexcept {
     record = {};
     record.condition = {value.condition.first, value.condition.count};
@@ -98,6 +111,7 @@ bool encode(const rewards::Modifier& value, RewardModifierRecord& record) noexce
     return true;
 }
 
+/** Decodes one weight modifier; the complete-domain validator checks its condition range. */
 bool decode(const RewardModifierRecord& record, rewards::Modifier& value) noexcept {
     value = {};
     value.condition = {record.condition.first, record.condition.count};
@@ -106,6 +120,7 @@ bool decode(const RewardModifierRecord& record, rewards::Modifier& value) noexce
     return true;
 }
 
+/** Encodes one socket override. */
 bool encode(const rewards::SocketOverride& value, RewardSocketOverrideRecord& record) noexcept {
     record = {};
     record.socketType = value.socketType;
@@ -116,6 +131,7 @@ bool encode(const rewards::SocketOverride& value, RewardSocketOverrideRecord& re
     return true;
 }
 
+/** Decodes one socket override; the complete-domain validator checks its plug reference. */
 bool decode(const RewardSocketOverrideRecord& record, rewards::SocketOverride& value) noexcept {
     value = {};
     value.socketType = record.socketType;

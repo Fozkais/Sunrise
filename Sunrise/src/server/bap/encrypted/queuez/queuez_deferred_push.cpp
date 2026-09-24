@@ -4,17 +4,17 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <span>
 
 #include "../../../../core/logging/log.h"
+#include "../../../../middleware/crypto/random_bytes.h"
 #include "../../../../middleware/secure_channel/runtime.h"
 #include "../../../../state/account/account_state.h"
 #include "../../../../state/activity/destination/definition.h"
 #include "../../../../state/activity/runtime.h"
-#include "../../../../state/build_data/runtime.h"
 #include "../../../../state/runtime/runtime.h"
 #include "../internal.h"
 #include "../push/activity/activity_keepalive_push.h"
-#include "queuez_reward_staging.h"
 #include "queuez_state_validation.h"
 #include "state/investment/store_internal.h"
 
@@ -56,23 +56,29 @@ selected_character(const state::AccountState& account) noexcept {
     return nullptr;
 }
 
-bool consume_world_record_reward(const WorldRewardRequest& request,
-                                 Session& session,
-                                 Scratch& scratch,
-                                 std::span<std::byte> response,
-                                 std::size_t& written,
-                                 bool& touchesScratch) noexcept {
+/** Publishes and commits one world reward resolved through its installed reward definition. */
+[[nodiscard]] bool consume_world_record_reward(const WorldRewardRequest& request,
+                                               Session& session,
+                                               Scratch& scratch,
+                                               std::span<std::byte> response,
+                                               std::size_t& written,
+                                               bool& touchesScratch) noexcept {
     const std::unique_ptr<state::PendingRecordRewardGrant> pending(
         new (std::nothrow) state::PendingRecordRewardGrant);
     const auto fail = [&](const char* reason) noexcept {
         report_reward_refusal("world_publish", request.itemDefinitionIndex, reason);
         return false;
     };
+    std::uint64_t seed = 0;
+    if (!middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))) {
+        return fail("random_source");
+    }
     const char* reason = "transaction";
     state::investment::store::Transaction transaction;
     if (!pending || !transaction.ready() || request.quantity <= 0
         || !state::prepare_item_reward(request.itemDefinitionIndex,
                                        static_cast<std::uint32_t>(request.quantity),
+                                       seed,
                                        *pending,
                                        &reason)) {
         return fail(reason);

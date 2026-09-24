@@ -6,11 +6,9 @@
 #include <mutex>
 #include <shared_mutex>
 
-#include "../../account/account_state.h"
 #include "../../unlocks/definition.h"
 #include "../table.h"
 #include "core/threading/srw_lock.h"
-#include "middleware/content/packages/tables/unlock_opcode.h"
 
 namespace sunrise::state::build_data::rewards {
 namespace {
@@ -23,6 +21,7 @@ Table<Instruction, kInstructionCapacity> g_instructions;
 Table<Modifier, kModifierCapacity> g_modifiers;
 Table<SocketOverride, kSocketOverrideCapacity> g_sockets;
 
+/** Borrows every published bank; the caller holds the catalog lock. */
 View view() noexcept {
     return {g_pools.rows(),
             g_entries.rows(),
@@ -32,6 +31,7 @@ View view() noexcept {
             g_sockets.rows()};
 }
 
+/** Rejects a pool cycle or a nested path deeper than kTraversalDepth, memoizing subtree heights. */
 bool valid_depth(View data,
                  std::size_t index,
                  std::array<std::uint8_t, kPoolCapacity>& heights,
@@ -60,6 +60,7 @@ bool valid_depth(View data,
     return true;
 }
 
+/** Checks one entry's references, dependent ranges and weight. */
 bool valid_entry(View data, const Entry& entry) noexcept {
     return (entry.itemIndex == kAbsent || entry.itemIndex < data.items.size())
            && (entry.poolIndex == kAbsent || entry.poolIndex < data.pools.size())
@@ -68,6 +69,7 @@ bool valid_entry(View data, const Entry& entry) noexcept {
            && fits(entry.sockets, data.sockets) && std::isfinite(entry.weight) && entry.weight >= 0;
 }
 
+/** An unavailable item row carries nothing; an available one names valid banks. */
 bool valid_item(View data, const Item& item) noexcept {
     if (item.definitionHash == 0) {
         return item.poolIndex == kAbsent && item.acquiredFlag == kAbsent
@@ -80,6 +82,7 @@ bool valid_item(View data, const Item& item) noexcept {
 
 } // namespace
 
+/** Discards the reward graph and every borrowed bank. */
 void clear() noexcept {
     const std::lock_guard guard(g_lock);
     g_pools.clear();
@@ -90,51 +93,13 @@ void clear() noexcept {
     g_sockets.clear();
 }
 
+/** @return True once pool and item banks have been published. */
 bool ready() noexcept {
     const std::shared_lock guard(g_lock);
     return g_pools.count() != 0 && g_items.count() != 0;
 }
 
-bool valid_instruction(const Instruction& instruction) noexcept {
-    const auto slot = instruction.operand;
-    switch (static_cast<BankRead>(instruction.opcode)) {
-    case BankRead::accountFlag:
-        return slot < unlocks::kAccountFlagCapacity;
-    case BankRead::profileFlag:
-        return slot < unlocks::kProfileFlagCapacity;
-    case BankRead::characterFlag:
-        return slot < unlocks::kCharacterObjectFlagCapacity;
-    case BankRead::accountValue:
-        return slot < unlocks::kObjectiveValueCapacity;
-    case BankRead::characterValue:
-        return slot < unlocks::kCharacterObjectValueCapacity;
-    case BankRead::characterClass:
-        return slot < kCharacterClassCount;
-    case BankRead::externalFlag:
-    case BankRead::externalValue:
-        return true;
-    default:
-        break;
-    }
-    using Op = middleware::content::packages::tables::UnlockOpcode;
-    switch (static_cast<Op>(instruction.opcode)) {
-    case Op::constant:
-    case Op::logicalNot:
-    case Op::logicalOr:
-    case Op::logicalAnd:
-    case Op::equal:
-    case Op::greaterThan:
-    case Op::greaterOrEqual:
-    case Op::lessThan:
-    case Op::lessOrEqual:
-    case Op::add:
-    case Op::negate:
-        return true;
-    default:
-        return false;
-    }
-}
-
+/** Checks bank ranges, item references and bounded acyclic pool traversal. */
 bool valid(View data) noexcept {
     if (data.pools.empty() || data.pools.size() > kPoolCapacity || data.entries.empty()
         || data.entries.size() > kEntryCapacity || data.items.empty()
@@ -159,7 +124,7 @@ bool valid(View data) noexcept {
             return false;
         }
     }
-    if (!std::all_of(data.instructions.begin(), data.instructions.end(), valid_instruction)) {
+    if (!std::all_of(data.instructions.begin(), data.instructions.end(), unlocks::valid)) {
         return false;
     }
     for (const Modifier& modifier : data.modifiers) {
@@ -168,8 +133,7 @@ bool valid(View data) noexcept {
         }
     }
     for (const SocketOverride& socket : data.sockets) {
-        if (socket.socketType == kAbsent
-            || (socket.plugItem != kAbsent && socket.plugItem >= data.items.size())) {
+        if (!valid_socket(socket, data.items.size())) {
             return false;
         }
     }
@@ -182,6 +146,7 @@ bool valid(View data) noexcept {
     return true;
 }
 
+/** Publishes validated banks together under the catalog lock. */
 bool replace(View data) noexcept {
     if (!valid(data)) {
         return false;
@@ -192,11 +157,13 @@ bool replace(View data) noexcept {
            && g_modifiers.replace(data.modifiers) && g_sockets.replace(data.sockets);
 }
 
+/** Lends every bank to one callback under the read lock. */
 bool read(void* context, bool (*consume)(void*, View) noexcept) noexcept {
     const std::shared_lock guard(g_lock);
     return consume != nullptr && g_pools.count() != 0 && consume(context, view());
 }
 
+/** Copies one extracted item row; unavailable rows are refused. */
 bool find_item(std::uint16_t itemIndex, Item& item) noexcept {
     item = {};
     const std::shared_lock guard(g_lock);
@@ -207,31 +174,37 @@ bool find_item(std::uint16_t itemIndex, Item& item) noexcept {
     return true;
 }
 
+/** Copies every pool; count is zero when the output is too small. */
 bool snapshot(std::span<Pool> output, std::size_t& count) noexcept {
     const std::shared_lock guard(g_lock);
     return g_pools.snapshot(output, count);
 }
 
+/** Copies every entry; count is zero when the output is too small. */
 bool snapshot(std::span<Entry> output, std::size_t& count) noexcept {
     const std::shared_lock guard(g_lock);
     return g_entries.snapshot(output, count);
 }
 
+/** Copies every item row; count is zero when the output is too small. */
 bool snapshot(std::span<Item> output, std::size_t& count) noexcept {
     const std::shared_lock guard(g_lock);
     return g_items.snapshot(output, count);
 }
 
+/** Copies every condition instruction; count is zero when the output is too small. */
 bool snapshot(std::span<Instruction> output, std::size_t& count) noexcept {
     const std::shared_lock guard(g_lock);
     return g_instructions.snapshot(output, count);
 }
 
+/** Copies every modifier; count is zero when the output is too small. */
 bool snapshot(std::span<Modifier> output, std::size_t& count) noexcept {
     const std::shared_lock guard(g_lock);
     return g_modifiers.snapshot(output, count);
 }
 
+/** Copies every socket override; count is zero when the output is too small. */
 bool snapshot(std::span<SocketOverride> output, std::size_t& count) noexcept {
     const std::shared_lock guard(g_lock);
     return g_sockets.snapshot(output, count);

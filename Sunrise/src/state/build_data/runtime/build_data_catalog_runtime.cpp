@@ -387,10 +387,4 @@ void clear_catalogs() noexcept {
 
 } // namespace runtime
 
-bool publish_reward_definitions(rewards::View definitions) noexcept {
-    runtime::persistence::Transaction transaction;
-    return transaction.active()
-           && transaction.finish(rewards::replace(definitions), rewards::clear);
-}
-
 } // namespace sunrise::state::build_data

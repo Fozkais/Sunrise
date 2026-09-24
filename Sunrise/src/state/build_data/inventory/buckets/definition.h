@@ -25,8 +25,11 @@ inline constexpr std::uint32_t kProfileSlotCapacity = 701;
 inline constexpr std::uint32_t kSmallProfileSlotCapacity = 6;
 /** An all-one bucket id means no runtime bucket is available. */
 inline constexpr std::uint8_t kUnavailableBucketId = (std::numeric_limits<std::uint8_t>::max)();
-/** Hidden plugs, perks and quest roots use this bucket instead of held inventory. */
-inline constexpr std::uint8_t kNonInventoryBucketId = 37;
+/**
+ * Season Pass perks share this 5-slot character bucket with quest roots. A reward item here that
+ * carries an acquisition flag is granted by setting that flag rather than as an inventory row.
+ */
+inline constexpr std::uint8_t kPerkBucketId = 37;
 /** Leaving out the unavailable id leaves at most 255 unique bucket records. */
 inline constexpr std::size_t kDescriptorCapacity = kUnavailableBucketId;
 /** Signed -1 marks a bucket that has no equipment slot. */

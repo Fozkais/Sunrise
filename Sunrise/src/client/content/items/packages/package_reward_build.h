@@ -1,5 +1,11 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <span>
+#include <vector>
+
 #include "../../../../middleware/content/packages/reader/reader.h"
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
 #include "../../../../state/account/account_state.h"
@@ -12,15 +18,21 @@ struct SlotMaps;
 /** Resolves expression references and unlock slots once for a package pass. */
 class RewardConditions {
 public:
+    /** Reads the root's flag, value, expression and class tables; false when one is missing. */
     [[nodiscard]] bool load(const middleware::content::packages::reader::Source& source,
                             middleware::content::packages::reader::Scratch& scratch,
                             std::span<const std::byte> root,
                             const SlotMaps& maps) noexcept;
-    [[nodiscard]] bool bind(state::build_data::rewards::Instruction& instruction) const noexcept;
+    /** Binds one native instruction; flag and value slots resolve to their saved bank. */
+    [[nodiscard]] bool bind(std::uint32_t native,
+                            std::uint32_t operand,
+                            state::build_data::rewards::Instruction& instruction) const noexcept;
+    /** Appends one expanded expression to the bank; the bank is unchanged on failure. */
     [[nodiscard]] bool read(std::span<const std::byte> blob,
                             std::size_t at,
                             std::vector<state::build_data::rewards::Instruction>& bank,
                             state::build_data::rewards::Range& range) const noexcept;
+    /** Expands a list of expressions into one program where every expression must hold. */
     [[nodiscard]] bool read_list(std::span<const std::byte> blob,
                                  std::size_t at,
                                  std::span<state::build_data::rewards::Instruction> output,
@@ -48,12 +60,16 @@ private:
 class RewardBuild {
 public:
     RewardConditions conditions;
+    /** Reads every reward pool; entries that fail to read are skipped and counted. */
     [[nodiscard]] bool load(const middleware::content::packages::reader::Source& source,
                             middleware::content::packages::reader::Scratch& scratch,
                             std::span<const std::byte> root,
                             const SlotMaps& maps) noexcept;
+    /** Sizes the dense item rows before the item walk. */
     [[nodiscard]] bool begin_items(std::size_t count) noexcept;
+    /** Records one item's wrapper and acquisition flag; an unreadable item stays unavailable. */
     void item(std::uint16_t index, std::uint32_t hash, std::span<const std::byte> blob) noexcept;
+    /** Drops rows naming items or pools that were not read, then publishes the banks. */
     [[nodiscard]] bool publish() noexcept;
 
 private:

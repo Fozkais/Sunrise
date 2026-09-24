@@ -287,9 +287,12 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
         || !hash_names::valid(domains.hashNames)) {
         return false;
     }
+    // Reward rows are dense by item index, so each must name its item or be unavailable.
+    if (domains.rewardItems.size() != domains.items.size()) {
+        return false;
+    }
     for (std::size_t index = 0; index < domains.items.size(); ++index) {
         if (domains.items[index].definitionIndex != index
-            || domains.rewardItems.size() != domains.items.size()
             || (domains.rewardItems[index].definitionHash != 0
                 && domains.rewardItems[index].definitionHash
                        != domains.items[index].definitionHash)) {
@@ -305,10 +308,7 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
             return false;
         }
         for (std::size_t i = 0; i < reward.socketCount; ++i) {
-            const auto& socket = reward.sockets[i];
-            if (socket.socketType == rewards::kAbsent
-                || (socket.plugItem != rewards::kAbsent
-                    && socket.plugItem >= domains.items.size())) {
+            if (!rewards::valid_socket(reward.sockets[i], domains.items.size())) {
                 return false;
             }
         }

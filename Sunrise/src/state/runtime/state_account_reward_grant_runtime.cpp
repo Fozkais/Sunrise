@@ -5,17 +5,13 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <limits>
 
-#include "../../middleware/crypto/random_bytes.h"
 #include "../../middleware/datagen/family4/loadout/loadout_resolver.h"
-#include "../build_data/rewards/reward_catalog.h"
 #include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
 #include "../rewards/reward_resolver.h"
 #include "../unlocks/unlocks_records.h"
-#include "../unlocks/unlocks_runtime.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
 #include "storage/internal.h"
@@ -27,8 +23,6 @@ namespace authored_inventory = account::inventory;
 namespace item_details = build_data::items::details;
 namespace inventory_buckets = build_data::inventory::buckets;
 namespace family4_loadout = middleware::datagen::family4::loadout;
-
-static_assert(build_data::rewards::kSocketsPerItem == item_details::kInitialPlugCapacity);
 
 namespace {
 
@@ -132,11 +126,11 @@ apply_reward_sockets(const item_details::Definition& detail,
 /** Wrappers and direct account perks bypass quest initialization. */
 bool uses_reward_definition(const build_data::items::Definition& item) noexcept {
     build_data::rewards::Item reward{};
-    if (!build_data::rewards::find_item(item.definitionIndex, reward)) {
+    if (!build_data::find_reward_item(item.definitionIndex, reward)) {
         return false;
     }
     return reward.poolIndex != build_data::rewards::kAbsent
-           || (item.bucketId == inventory_buckets::kNonInventoryBucketId
+           || (item.bucketId == inventory_buckets::kPerkBucketId
                && reward.acquiredFlag != build_data::rewards::kAbsent);
 }
 
@@ -153,7 +147,7 @@ enum class PassResolution { claim, replay };
     build_data::rewards::Item source{};
     if (character >= account.characterCount
         || !investment::store::read_unlocks(flags, static_cast<int>(character))
-        || !build_data::rewards::find_item(reward.itemIndex, source)
+        || !build_data::find_reward_item(reward.itemIndex, source)
         || source.definitionHash != reward.itemHash || reward.socketCount > reward.sockets.size()
         || reward.conditionCount > reward.condition.size()) {
         return false;
@@ -206,7 +200,7 @@ enum class PassResolution { claim, replay };
         build_data::items::Definition definition{};
         build_data::rewards::Item source{};
         if (!build_data::find_item_definition_index(planned.itemIndex, definition)
-            || !build_data::rewards::find_item(planned.itemIndex, source)
+            || !build_data::find_reward_item(planned.itemIndex, source)
             || prepared.definitionHash != definition.definitionHash
             || prepared.quantity != planned.quantity
             || prepared.acquiredFlag != source.acquiredFlag) {
@@ -236,6 +230,7 @@ enum class PassResolution { claim, replay };
 } // namespace
 
 bool prepare_season_pass_reward(std::uint16_t rewardIndex,
+                                std::uint64_t seed,
                                 PendingSeasonPassReward& mutation,
                                 const char** refusal) noexcept {
     const char* unused = nullptr;
@@ -255,12 +250,7 @@ bool prepare_season_pass_reward(std::uint16_t rewardIndex,
     if (season_pass_reward_claimed(rewardIndex)) {
         return false;
     }
-    reason = "random_source";
-    std::array<std::byte, sizeof mutation.seed> random{};
-    if (!middleware::crypto::random::fill(random)) {
-        return false;
-    }
-    std::memcpy(&mutation.seed, random.data(), random.size());
+    mutation.seed = seed;
     rewards::Result resolved{};
     reason = "reward_condition";
     if (!resolve_pass(
@@ -306,6 +296,7 @@ ItemGrantRoute item_grant_route(std::uint16_t itemIndex) noexcept {
 
 bool prepare_item_reward(std::uint16_t itemIndex,
                          std::uint32_t quantity,
+                         std::uint64_t seed,
                          PendingRecordRewardGrant& mutation,
                          const char** refusal) noexcept {
     const char* unused = nullptr;
@@ -314,16 +305,9 @@ bool prepare_item_reward(std::uint16_t itemIndex,
     mutation = {};
     const std::lock_guard lock(investment::store::g_mutex);
     build_data::items::Definition item{};
-    std::array<std::byte, sizeof(std::uint64_t)> random{};
     if (!build_data::find_item_definition_index(itemIndex, item)) {
         return false;
     }
-    reason = "random_source";
-    if (!middleware::crypto::random::fill(random)) {
-        return false;
-    }
-    std::uint64_t seed = 0;
-    std::memcpy(&seed, random.data(), random.size());
     reason = "selected_character";
     const AccountState account = account_snapshot();
     const auto character = selected_character_index(account);
@@ -440,8 +424,8 @@ namespace {
         if (reward.kind == RecordRewardKind::accountUnlock) {
             build_data::rewards::Item source{};
             if (reward.quantity != 1 || reward.afterQuantity != 1 || reward.instanceSoid != 0
-                || item.bucketId != build_data::inventory::buckets::kNonInventoryBucketId
-                || !build_data::rewards::find_item(item.definitionIndex, source)
+                || item.bucketId != build_data::inventory::buckets::kPerkBucketId
+                || !build_data::find_reward_item(item.definitionIndex, source)
                 || source.acquiredFlag == build_data::rewards::kAbsent
                 || source.acquiredFlag != reward.acquiredFlag) {
                 return false;
@@ -556,7 +540,7 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
         if (requested.acquireUnlock) {
             reason = "acquisition_flag";
             build_data::rewards::Item source{};
-            if (!build_data::rewards::find_item(item.definitionIndex, source)
+            if (!build_data::find_reward_item(item.definitionIndex, source)
                 || source.definitionHash != item.definitionHash) {
                 return false;
             }
@@ -571,7 +555,7 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
                 prepared.previousFlag = static_cast<std::uint8_t>(before);
             }
         }
-        if (item.bucketId == build_data::inventory::buckets::kNonInventoryBucketId) {
+        if (item.bucketId == build_data::inventory::buckets::kPerkBucketId) {
             reason = "perk_acquisition";
             if (prepared.acquiredFlag == build_data::rewards::kAbsent || requested.quantity != 1
                 || !requested.sockets.empty()) {

@@ -188,6 +188,7 @@ namespace sunrise::server::bap::encrypted::queuez {
                                              std::span<const std::uint64_t> appendedResidents,
                                              RecordRewardGrant& grant) noexcept;
 
+/** Stages a prepared record-reward grant, appending the residents its new instances need. */
 [[nodiscard]] bool stage_record_reward_grant(const SessionState& before,
                                              const state::PendingRecordRewardGrant& pending,
                                              RecordRewardGrant& grant) noexcept;

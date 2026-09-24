@@ -8,16 +8,14 @@
 #include <limits>
 #include <span>
 
-#include "../build_data/rewards/reward_catalog.h"
+#include "../../core/logging/log.h"
 #include "../build_data/runtime.h"
-#include "../build_data/season_pass/season_pass_catalog.h"
 #include "../investment/investment.h"
 #include "../investment/store_internal.h"
 #include "../progression/season_pass_reward_catalog.h"
 #include "../rewards/reward_resolver.h"
 #include "../unlocks/definition.h"
 #include "../unlocks/unlocks_runtime.h"
-#include "core/logging/log.h"
 #include "runtime.h"
 #include "state.h"
 #include "state_account_transaction_helpers.h"
@@ -249,8 +247,9 @@ bool publish_artifact_character_banks(CharacterArtifactWrite& write) noexcept {
     return publish_artifact_character_banks(write);
 }
 
+/** Logs one earned perk whose flags were not granted, and why. */
 void report_perk_refusal(std::size_t index, const char* reason) noexcept {
-    core::log::writef(core::log::Channel::server,
+    core::log::writef(core::log::Channel::state,
                       core::log::Level::warn,
                       "ev=season_xp stage=automatic_perk index=%zu result=skip reason=%s",
                       index,
@@ -259,7 +258,7 @@ void report_perk_refusal(std::size_t index, const char* reason) noexcept {
 
 /** Earned perks set both flags in the transaction that publishes their qualifying rank. */
 bool grant_progress_flags() noexcept {
-    if (!build_data::season_pass_ready() || !build_data::rewards::ready()
+    if (!build_data::season_pass_ready() || !build_data::reward_definitions_ready()
         || !build_data::item_definitions_ready()) {
         return true;
     }
@@ -276,7 +275,7 @@ bool grant_progress_flags() noexcept {
         return false;
     }
     const auto rank = seasonal_rank();
-    const auto count = build_data::season_pass::count();
+    const auto count = build_data::season_pass_reward_count();
     for (std::size_t index = 0; index < count; ++index) {
         build_data::season_pass::Reward reward{};
         if (!build_data::find_season_pass_reward(static_cast<std::uint16_t>(index), reward)) {
@@ -336,21 +335,20 @@ bool publish_experience_lanes(std::int32_t experience) noexcept {
 
 } // namespace
 
-// Packages share the perk bucket; only rewards without a pool grant the flag directly.
+/** Packages share the perk bucket; only rewards without a pool grant the flag directly. */
 std::uint16_t
 progression::season_pass::progress_flag(const build_data::season_pass::Reward& reward) noexcept {
-    namespace rewards = build_data::rewards;
     build_data::items::Definition item{};
-    rewards::Item acquisition{};
+    build_data::rewards::Item acquisition{};
     if (build_data::find_item_definition_index(reward.itemIndex, item)
         && item.definitionHash == reward.itemHash
-        && item.bucketId == build_data::inventory::buckets::kNonInventoryBucketId
-        && rewards::find_item(reward.itemIndex, acquisition)
+        && item.bucketId == build_data::inventory::buckets::kPerkBucketId
+        && build_data::find_reward_item(reward.itemIndex, acquisition)
         && acquisition.definitionHash == reward.itemHash
-        && acquisition.poolIndex == rewards::kAbsent) {
+        && acquisition.poolIndex == build_data::rewards::kAbsent) {
         return acquisition.acquiredFlag;
     }
-    return rewards::kAbsent;
+    return build_data::rewards::kAbsent;
 }
 
 /** @return Seasonal XP published in the account progression bank. */

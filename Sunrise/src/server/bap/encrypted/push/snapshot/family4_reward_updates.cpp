@@ -21,6 +21,11 @@ namespace sunrise::server::bap::encrypted::push::snapshot {
 
 namespace family4_datagen = middleware::datagen::family4;
 
+// Every row one reward grant publishes is named in the character or the profile change list.
+static_assert(state::kRecordRewardGrantCapacity
+              == family4_datagen::character::layout::kInventoryChangeRecordCapacity
+                     + family4_datagen::account::layout::kProfileInventoryChangeRecordCapacity);
+
 /** Builds all record rewards and the pending claim into one Family-4 revision. */
 bool prepare_record_reward_grant(
     Scratch& scratch,

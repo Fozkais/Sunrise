@@ -8,8 +8,6 @@ namespace sunrise::state::build_data::rewards {
 void clear() noexcept;
 /** True once pool and item banks have been published. */
 [[nodiscard]] bool ready() noexcept;
-/** Checks a bound instruction against its saved bank and the native opcode range. */
-[[nodiscard]] bool valid_instruction(const Instruction& instruction) noexcept;
 /** Checks bank ranges, item references and bounded acyclic pool traversal. */
 [[nodiscard]] bool valid(View data) noexcept;
 /** Publishes validated banks together under the catalog lock. */

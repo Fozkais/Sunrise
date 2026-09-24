@@ -2,7 +2,6 @@
 
 #include <limits>
 
-#include "../../../../state/build_data/inventory/buckets/definition.h"
 #include "definition_index_table.h"
 #include "internal.h"
 
@@ -58,6 +57,9 @@ constexpr std::uint32_t kItemPresenceFlagClass = 0x80807D4BU;
 constexpr std::size_t kItemPresenceFlagStride = sizeof(std::uint16_t);
 /** Authored value/flag slots must fit the nonnegative range of a signed 16-bit mapping. */
 constexpr std::uint16_t kUnlockSlotLimit = 0x8000U;
+/** Policy: pursuits without presence flags need a bucket-37 root with no objective block. */
+constexpr std::uint8_t kSeparateQuestRootBucketId = 37;
+
 /** Map +40 has no supported save bank; a matching slot makes initialization unsafe. */
 constexpr std::size_t kThirdValueMapDescriptor = 40;
 /** Map +56 is also checked for duplicate slots but has no supported save bank. */
@@ -197,7 +199,7 @@ Quest read_quest_initialization(std::span<const std::byte> definition,
         std::uint8_t parentBucket = 0;
         std::int64_t parentObjective = 0;
         if (parentIndex == itemIndex || !read(parent, kBucketIdOffset, parentBucket)
-            || parentBucket != state::build_data::inventory::buckets::kNonInventoryBucketId
+            || parentBucket != kSeparateQuestRootBucketId
             || !read(parent, kItemObjectiveBlockOffset, parentObjective) || parentObjective != 0) {
             return {};
         }

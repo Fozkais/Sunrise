@@ -1,10 +1,10 @@
 #include <algorithm>
 #include <limits>
 
-#include "../../../../middleware/content/packages/tables/internal.h"
+#include "../../../../core/logging/log.h"
+#include "../../../../middleware/content/packages/tables/field_reader.h"
 #include "../../../../state/build_data/season_pass/season_pass_catalog.h"
 #include "../../../../state/progression/season_pass_reward_catalog.h"
-#include "core/logging/log.h"
 #include "internal.h"
 #include "package_reward_build.h"
 
@@ -13,6 +13,10 @@ namespace {
 
 namespace domain = state::build_data::season_pass;
 
+/**
+ * Reads one pass row: item, rank, quantity and claim flag, then its sockets and conditions.
+ * @return False when any field is unreadable or out of range.
+ */
 bool read_season_reward(Storage& storage,
                         std::span<const std::byte> progressionTable,
                         const tables::Array& itemRows,
@@ -21,17 +25,19 @@ bool read_season_reward(Storage& storage,
     std::uint32_t rank = 0;
     std::uint32_t itemIndex = 0;
     std::uint32_t claimSlot = 0;
-    tables::IndexRow entry{};
     if (!tables::read(progressionTable, at + tables::kProgressionRewardRankOffset, rank)
         || !tables::read(
             progressionTable, at + tables::kProgressionRewardItemIndexOffset, itemIndex)
         || !tables::read(
             progressionTable, at + tables::kProgressionRewardQuantityOffset, reward.quantity)
         || !tables::read(
-            progressionTable, at + tables::kProgressionRewardClaimSlotOffset, claimSlot)
-        || reward.quantity == 0
-        || reward.quantity > static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())
-        || rank > (std::numeric_limits<std::uint8_t>::max)()
+            progressionTable, at + tables::kProgressionRewardClaimSlotOffset, claimSlot)) {
+        return false;
+    }
+
+    // Native fields are 32-bit, the stored row keeps the narrower native index widths.
+    tables::IndexRow entry{};
+    if (rank > (std::numeric_limits<std::uint8_t>::max)()
         || itemIndex > (std::numeric_limits<std::uint16_t>::max)()
         || claimSlot > (std::numeric_limits<std::uint16_t>::max)()
         || !tables::index_row(storage.itemIndexTable, itemRows, itemIndex, entry)) {
@@ -40,45 +46,50 @@ bool read_season_reward(Storage& storage,
     reward.itemHash = entry.definitionHash;
     reward.itemIndex = static_cast<std::uint16_t>(itemIndex);
     reward.requiredRank = static_cast<std::uint8_t>(rank);
-    std::size_t socketCount = 0;
-    if (!read_reward_sockets(progressionTable,
-                             at + tables::kProgressionRewardSocketsOffset,
-                             reward.sockets,
-                             socketCount)) {
-        return false;
-    }
-    reward.socketCount = static_cast<std::uint8_t>(socketCount);
-    std::size_t conditionCount = 0;
-    if (!storage.rewardBuild.conditions.read_list(progressionTable,
-                                                  at + tables::kProgressionRewardConditionsOffset,
-                                                  reward.condition,
-                                                  conditionCount)) {
-        return false;
-    }
-    reward.conditionCount = static_cast<std::uint8_t>(conditionCount);
-    // A reward with no claim flag carries slot 0.
+
+    // A reward with no claim flag carries slot 0, any other slot must map to the account bank.
     if (claimSlot != 0) {
         reward.claimFlagIndex =
             bank_index(storage.slotMaps.accountFlag, static_cast<std::int32_t>(claimSlot));
+        if (reward.claimFlagIndex == domain::kUnavailableFlagIndex) {
+            return false;
+        }
     }
 
-    if (!domain::valid(std::span(&reward, 1))
-        || (claimSlot != 0 && reward.claimFlagIndex == domain::kUnavailableFlagIndex)
-        || !std::all_of(reward.sockets.begin(),
-                        reward.sockets.begin() + reward.socketCount,
-                        [&](const auto& socket) {
-                            return socket.socketType != state::build_data::rewards::kAbsent
-                                   && (socket.plugItem == state::build_data::rewards::kAbsent
-                                       || socket.plugItem < itemRows.count);
-                        })) {
+    std::size_t socketCount = 0;
+    std::size_t conditionCount = 0;
+    if (!read_reward_sockets(progressionTable,
+                             at + tables::kProgressionRewardSocketsOffset,
+                             reward.sockets,
+                             socketCount)
+        || !storage.rewardBuild.conditions.read_list(
+            progressionTable,
+            at + tables::kProgressionRewardConditionsOffset,
+            reward.condition,
+            conditionCount)) {
         return false;
     }
-    return true;
+    reward.socketCount = static_cast<std::uint8_t>(socketCount);
+    reward.conditionCount = static_cast<std::uint8_t>(conditionCount);
+    return domain::valid(std::span(&reward, 1))
+           && std::all_of(reward.sockets.begin(),
+                          reward.sockets.begin() + reward.socketCount,
+                          [&itemRows](const state::build_data::rewards::SocketOverride& socket) {
+                              return state::build_data::rewards::valid_socket(socket,
+                                                                              itemRows.count);
+                          });
 }
 
 } // namespace
 
-/** Preserves native reward order for opcode-2400 claim indices. */
+/**
+ * Reads the season pass reward list in native order, which the opcode-2400 claim indexes.
+ * A row that fails to read is kept as an unavailable row so later claim indices stay aligned.
+ * @param source Installed package source.
+ * @param storage Pass storage receiving the reward rows.
+ * @param root Investment root bytes.
+ * @return True when the reward list read and produced at least one row.
+ */
 bool build_season_pass(const reader::Source& source,
                        Storage& storage,
                        std::span<const std::byte> root) noexcept {

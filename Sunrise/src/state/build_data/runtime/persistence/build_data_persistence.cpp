@@ -131,7 +131,7 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && material_requirement_sets_ready() && inventory_bucket_descriptors_ready()
            && socket_entry_lists_ready() && ability_buckets_ready()
            && progression_definitions_ready() && season_pass_ready() && repeatable_bounties_ready()
-           && rewards::ready() && record_definitions_ready() && node_definitions_ready()
+           && reward_definitions_ready() && record_definitions_ready() && node_definitions_ready()
            && sobject_definitions_ready() && scenario_layouts_ready() && spawn_sets_ready()
            && hash_names_ready() && vendor_catalog_ready()
            && gameplay::entity_position_profiles::available()
@@ -273,14 +273,14 @@ cache::records::MutableDomains scratch_domains(Context& state) noexcept {
         progressionSteps,
         seasonPassRewards,
         bountyRows,
-        ensure_scratch<rewards::Pool, rewards::kPoolCapacity>(state.rewardPoolsScratch),
-        ensure_scratch<rewards::Entry, rewards::kEntryCapacity>(state.rewardEntriesScratch),
-        ensure_scratch<rewards::Item, rewards::kItemCapacity>(state.rewardItemsScratch),
+        ensure_scratch<rewards::Pool, rewards::kPoolCapacity>(state.rewardPoolScratch),
+        ensure_scratch<rewards::Entry, rewards::kEntryCapacity>(state.rewardEntryScratch),
+        ensure_scratch<rewards::Item, rewards::kItemCapacity>(state.rewardItemScratch),
         ensure_scratch<rewards::Instruction, rewards::kInstructionCapacity>(
-            state.rewardInstructionsScratch),
-        ensure_scratch<rewards::Modifier, rewards::kModifierCapacity>(state.rewardModifiersScratch),
+            state.rewardInstructionScratch),
+        ensure_scratch<rewards::Modifier, rewards::kModifierCapacity>(state.rewardModifierScratch),
         ensure_scratch<rewards::SocketOverride, rewards::kSocketOverrideCapacity>(
-            state.rewardSocketsScratch),
+            state.rewardSocketScratch),
     };
 }
 
@@ -311,13 +311,12 @@ void release_scratch_locked(Context& state) noexcept {
     release_bank(state.progressionStepScratch);
     release_bank(state.seasonPassRewardScratch);
     release_bank(state.bountyScratch);
-    release_bank(state.rewardPoolsScratch);
-    release_bank(state.rewardEntriesScratch);
-    release_bank(state.rewardItemsScratch);
-    release_bank(state.rewardInstructionsScratch);
-    release_bank(state.rewardModifiersScratch);
-    release_bank(state.rewardSocketsScratch);
-
+    release_bank(state.rewardPoolScratch);
+    release_bank(state.rewardEntryScratch);
+    release_bank(state.rewardItemScratch);
+    release_bank(state.rewardInstructionScratch);
+    release_bank(state.rewardModifierScratch);
+    release_bank(state.rewardSocketScratch);
     release_bank(state.recordScratch);
     release_bank(state.recordObjectiveScratch);
     release_bank(state.recordIntervalScratch);
@@ -420,14 +419,14 @@ cache::records::Domains occupied_domains(Context& state,
         std::span<const season_pass::Reward>{state.seasonPassRewardScratch.data(),
                                              counts.seasonPassRewards},
         std::span<const bounties::Definition>{state.bountyScratch.data(), counts.bounties},
-        std::span<const rewards::Pool>{state.rewardPoolsScratch.data(), counts.rewardPools},
-        std::span<const rewards::Entry>{state.rewardEntriesScratch.data(), counts.rewardEntries},
-        std::span<const rewards::Item>{state.rewardItemsScratch.data(), counts.rewardItems},
-        std::span<const rewards::Instruction>{state.rewardInstructionsScratch.data(),
+        std::span<const rewards::Pool>{state.rewardPoolScratch.data(), counts.rewardPools},
+        std::span<const rewards::Entry>{state.rewardEntryScratch.data(), counts.rewardEntries},
+        std::span<const rewards::Item>{state.rewardItemScratch.data(), counts.rewardItems},
+        std::span<const rewards::Instruction>{state.rewardInstructionScratch.data(),
                                               counts.rewardInstructions},
-        std::span<const rewards::Modifier>{state.rewardModifiersScratch.data(),
+        std::span<const rewards::Modifier>{state.rewardModifierScratch.data(),
                                            counts.rewardModifiers},
-        std::span<const rewards::SocketOverride>{state.rewardSocketsScratch.data(),
+        std::span<const rewards::SocketOverride>{state.rewardSocketScratch.data(),
                                                  counts.rewardSockets},
     };
 }

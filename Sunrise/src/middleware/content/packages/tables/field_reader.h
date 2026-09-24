@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <limits>
 #include <span>
 
 namespace sunrise::middleware::content::packages::tables {
@@ -21,6 +23,27 @@ read(std::span<const std::byte> blob, std::size_t offset, Value& value) noexcept
     }
     std::memcpy(&value, blob.data() + offset, sizeof value);
     return true;
+}
+
+/**
+ * Resolves a self-relative field.
+ * @param field Offset of the 8-byte signed delta.
+ * @param target Receives the resolved offset.
+ * @return False when the delta is zero or the target falls outside the blob.
+ */
+[[nodiscard]] inline bool
+relative(std::span<const std::byte> bytes, std::size_t field, std::size_t& target) noexcept {
+    std::int64_t delta{};
+    if (!read(bytes, field, delta) || delta == 0
+        || field > static_cast<std::size_t>((std::numeric_limits<std::int64_t>::max)())) {
+        return false;
+    }
+    const auto base = static_cast<std::int64_t>(field);
+    if (delta < -base || delta > (std::numeric_limits<std::int64_t>::max)() - base) {
+        return false;
+    }
+    target = static_cast<std::size_t>(base + delta);
+    return target < bytes.size();
 }
 
 } // namespace sunrise::middleware::content::packages::tables

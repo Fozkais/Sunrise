@@ -9,9 +9,6 @@
 
 namespace sunrise::middleware::content::packages::tables {
 
-/** Upstream's record/node field heuristic; this is not the reward evaluator's opcode limit. */
-inline constexpr std::uint32_t kExpressionDetectionOpcodeCeiling = 20;
-
 /**
  * Reads the first operand of a given opcode out of one expression field.
  * The same field holds a value read on one row and a flag test on another, so the opcode is asked
@@ -54,7 +51,7 @@ inline constexpr std::uint32_t kExpressionDetectionOpcodeCeiling = 20;
         const std::size_t at = base + static_cast<std::size_t>(index) * kUnlockInstructionStride;
         std::memcpy(&instruction, table.data() + at, sizeof instruction);
         std::memcpy(&operand, table.data() + at + kUnlockInstructionOperandOffset, sizeof operand);
-        if (instruction > kExpressionDetectionOpcodeCeiling) {
+        if (instruction > kUnlockOpcodeCeiling) {
             return false;
         }
         if (instruction == opcode && operand <= static_cast<std::uint32_t>(INT16_MAX)) {

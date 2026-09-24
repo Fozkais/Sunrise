@@ -85,6 +85,7 @@ struct Storage {
     reader::Scratch scratch{};
     /** Read once per root. Every domain resolves its unlock slots through these. */
     SlotMaps slotMaps{};
+    /** Reward pools, wrappers and condition tables read alongside the item walk. */
     RewardBuild rewardBuild{};
     /** Node rows held until the value slot and owned records are resolved. */
     std::array<state::build_data::nodes::Definition, state::build_data::nodes::kDefinitionCapacity>

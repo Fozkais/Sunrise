@@ -4,7 +4,6 @@
 #include "../../../../middleware/content/packages/tables/quest_initialization_reader.h"
 #include "../../../../state/build_data/items/catalysts/exotic_catalyst_builder.h"
 #include "../../../../state/build_data/items/details/item_detail_catalog.h"
-#include "../../../../state/build_data/rewards/reward_catalog.h"
 #include "../../../../state/build_data/runtime.h"
 #include "internal.h"
 #include "package_socket_plug_build.h"
@@ -62,7 +61,7 @@ bool build_item_rows(const reader::Source& source,
                      const tables::Array& table,
                      std::size_t& rowCount,
                      const char*& reason) noexcept {
-    const bool needRewards = !state::build_data::rewards::ready();
+    const bool needRewards = !state::build_data::reward_definitions_ready();
     const bool rewardStorageReady =
         !needRewards || storage.rewardBuild.begin_items(static_cast<std::size_t>(table.count));
     const bool needDefinitions = !state::build_data::item_definitions_ready();

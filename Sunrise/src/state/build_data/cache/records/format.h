@@ -32,7 +32,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 69;
+inline constexpr std::uint32_t kCacheFormatVersion = 70;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -320,7 +320,10 @@ struct RewardSocketOverrideRecord {
 
 /** One normalized reward-condition instruction. */
 struct RewardInstructionRecord {
-    std::uint32_t opcode{};
+    std::uint8_t opcode{};
+    std::uint8_t bank{};
+    /** Must be zero, so the packed instruction always matches. */
+    std::uint16_t reserved{};
     std::uint32_t operand{};
 };
 
@@ -664,7 +667,8 @@ static_assert(sizeof(RewardModifierRecord)
               == sizeof(RewardRangeRecord) + sizeof(std::uint16_t) + sizeof(float));
 static_assert(sizeof(RewardSocketOverrideRecord)
               == 4 * sizeof(std::uint16_t) + sizeof(std::uint32_t));
-static_assert(sizeof(RewardInstructionRecord) == 2 * sizeof(std::uint32_t));
+static_assert(sizeof(RewardInstructionRecord)
+              == 2 * sizeof(std::uint8_t) + sizeof(std::uint16_t) + sizeof(std::uint32_t));
 
 static_assert(sizeof(Prefix) == kCacheMagic.size() + sizeof(std::uint32_t));
 static_assert(sizeof(InvestmentConstants)

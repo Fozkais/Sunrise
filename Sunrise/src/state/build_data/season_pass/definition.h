@@ -14,8 +14,8 @@ inline constexpr std::size_t kRewardCapacity = 256;
 /** A reward whose claim flag no mapping table addresses carries this instead of an index. */
 inline constexpr std::uint16_t kUnavailableFlagIndex = 0xFFFFU;
 
-/** Bound on the expanded eligibility expression of one pass row. */
-inline constexpr std::size_t kConditionCapacity = 64;
+/** Instructions in one row's expanded eligibility condition. The longest shipped row needs 5. */
+inline constexpr std::size_t kConditionCapacity = 16;
 
 /** One reward row of the pass, in the native order the opcode-2400 claim names by index. */
 struct Reward {
@@ -29,8 +29,10 @@ struct Reward {
     std::uint16_t claimFlagIndex{kUnavailableFlagIndex};
     /** Rank the account needs before the row may be claimed. */
     std::uint8_t requiredRank{};
+    /** Fixed plugs this row places on the granted item, in native order. */
     std::array<rewards::SocketOverride, rewards::kSocketsPerItem> sockets{};
     std::uint8_t socketCount{};
+    /** Bound eligibility condition; every native expression on the row must hold. */
     std::array<rewards::Instruction, kConditionCapacity> condition{};
     std::uint8_t conditionCount{};
 };

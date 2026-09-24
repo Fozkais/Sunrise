@@ -21,4 +21,9 @@ bool find_season_pass_reward(std::uint16_t rewardIndex, season_pass::Reward& rew
     return season_pass::find(rewardIndex, reward);
 }
 
+/** @return Season pass reward rows in State. */
+std::size_t season_pass_reward_count() noexcept {
+    return season_pass::count();
+}
+
 } // namespace sunrise::state::build_data

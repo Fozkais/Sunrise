@@ -6,6 +6,7 @@
 
 namespace sunrise::state::rewards {
 
+/** One item a resolved reward grants, with the socket overrides its row carries. */
 struct Grant {
     std::uint16_t itemIndex{build_data::rewards::kAbsent};
     std::int32_t quantity{};
@@ -13,6 +14,7 @@ struct Grant {
     std::size_t socketCount{};
 };
 
+/** Every grant one resolution produces, in draw order. */
 struct Result {
     std::array<Grant, build_data::rewards::kGrantCapacity> grants{};
     std::size_t count{};
@@ -27,6 +29,7 @@ struct Context {
     const char** refusal{};
 };
 
+/** Evaluates one bound condition; an empty condition is always eligible. */
 [[nodiscard]] bool eligible(std::span<const build_data::rewards::Instruction> instructions,
                             const Context& context,
                             bool& result) noexcept;

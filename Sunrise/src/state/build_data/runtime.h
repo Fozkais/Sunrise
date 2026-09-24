@@ -413,6 +413,36 @@ publish_progression_definitions(std::span<const progressions::Definition> defini
 [[nodiscard]] bool find_season_pass_reward(std::uint16_t rewardIndex,
                                            season_pass::Reward& reward) noexcept;
 
+/** @return Season pass reward rows in State, including unavailable rows. */
+[[nodiscard]] std::size_t season_pass_reward_count() noexcept;
+
+/** @return True when the reward pools and item wrappers are in State. */
+[[nodiscard]] bool reward_definitions_ready() noexcept;
+
+/**
+ * Publishes the complete reward graph in one step.
+ * @param definitions Pools, entries, item rows, conditions, modifiers and socket overrides.
+ * @return True when the graph passes the checks and any needed cache write succeeds.
+ */
+[[nodiscard]] bool publish_reward_definitions(rewards::View definitions) noexcept;
+
+/**
+ * Reads one item's reward row.
+ * @param itemIndex Native item-definition index.
+ * @param item Receives the row.
+ * @return True when the catalog holds an extracted row for that item.
+ */
+[[nodiscard]] bool find_reward_item(std::uint16_t itemIndex, rewards::Item& item) noexcept;
+
+/**
+ * Lends the complete reward graph to one callback under the catalog's read lock.
+ * @param context Caller state passed through unchanged.
+ * @param consume Receives the graph, which stays valid only during the call.
+ * @return The callback's result, or false when no graph is published.
+ */
+[[nodiscard]] bool read_reward_definitions(void* context,
+                                           bool (*consume)(void*, rewards::View) noexcept) noexcept;
+
 /** @return True when the repeatable bounty table is in State. */
 [[nodiscard]] bool repeatable_bounties_ready() noexcept;
 
@@ -750,6 +780,4 @@ publish_vendor_catalog(std::span<const vendors::IndexEntry> index,
  */
 [[nodiscard]] bool persist() noexcept;
 
-/** Publishes a complete, validated reward graph. */
-[[nodiscard]] bool publish_reward_definitions(rewards::View definitions) noexcept;
 } // namespace sunrise::state::build_data

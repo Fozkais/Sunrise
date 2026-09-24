@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "../../core/logging/log.h"
+#include "../../middleware/crypto/random_bytes.h"
 #include "../../middleware/web_service/messages/opcode1801.h"
 #include "../../middleware/web_service/messages/opcode1821.h"
 #include "../../middleware/web_service/messages/opcode2400.h"
@@ -156,8 +157,13 @@ void claim_season_pass_reward(const middleware::web_service::Message& message,
     if (grant == nullptr) {
         return fail("storage");
     }
+    std::uint64_t seed = 0;
+    if (!middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))) {
+        clear_mutation(outcome);
+        return fail("random_source");
+    }
     const char* reason = nullptr;
-    if (!state::prepare_season_pass_reward(request.rewardIndex, *grant, &reason)) {
+    if (!state::prepare_season_pass_reward(request.rewardIndex, seed, *grant, &reason)) {
         clear_mutation(outcome);
         return fail(reason != nullptr ? reason : "reward_preparation");
     }

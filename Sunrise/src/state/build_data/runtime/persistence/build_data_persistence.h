@@ -80,13 +80,12 @@ struct Context {
     std::vector<progressions::Step> progressionStepScratch{};
     std::vector<season_pass::Reward> seasonPassRewardScratch{};
     std::vector<bounties::Definition> bountyScratch{};
-    std::vector<rewards::Pool> rewardPoolsScratch{};
-    std::vector<rewards::Entry> rewardEntriesScratch{};
-    std::vector<rewards::Item> rewardItemsScratch{};
-    std::vector<rewards::Instruction> rewardInstructionsScratch{};
-    std::vector<rewards::Modifier> rewardModifiersScratch{};
-    std::vector<rewards::SocketOverride> rewardSocketsScratch{};
-
+    std::vector<rewards::Pool> rewardPoolScratch{};
+    std::vector<rewards::Entry> rewardEntryScratch{};
+    std::vector<rewards::Item> rewardItemScratch{};
+    std::vector<rewards::Instruction> rewardInstructionScratch{};
+    std::vector<rewards::Modifier> rewardModifierScratch{};
+    std::vector<rewards::SocketOverride> rewardSocketScratch{};
     std::vector<records::Definition> recordScratch{};
     std::vector<records::Objective> recordObjectiveScratch{};
     std::vector<records::Interval> recordIntervalScratch{};

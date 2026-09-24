@@ -4,11 +4,11 @@
 #include <cmath>
 #include <vector>
 
+#include "../../../../core/logging/log.h"
 #include "../../../../middleware/content/packages/tables/definition_index_table.h"
-#include "../../../../middleware/content/packages/tables/internal.h"
-#include "../../../../state/build_data/rewards/reward_catalog.h"
+#include "../../../../middleware/content/packages/tables/field_reader.h"
 #include "../../../../state/build_data/runtime.h"
-#include "core/logging/log.h"
+#include "../../../../state/unlocks/unlocks_expression.h"
 #include "internal.h"
 
 namespace sunrise::client::content::items::packages {
@@ -17,6 +17,7 @@ namespace {
 namespace reader = middleware::content::packages::reader;
 namespace tables = middleware::content::packages::tables;
 namespace domain = state::build_data::rewards;
+namespace unlocks = state::unlocks;
 
 /** Investment-root slots identify reward pools and unlock-slot bindings. */
 constexpr std::size_t kSupplementalRewardSlot = 84;
@@ -76,7 +77,7 @@ constexpr std::size_t kSocketSelectionOffset = 8;
 /** Relative definition bodies are preceded by their four-byte schema class. */
 constexpr std::size_t kDefinitionClassPrefixSize = sizeof(std::uint32_t);
 
-// Class rows name a default finisher whose use gate supplies the computed class flag.
+/** Class rows name a default finisher whose use gate supplies the computed class flag. */
 constexpr std::size_t kClassSlot = 12;
 constexpr std::size_t kClassStride = 32;
 constexpr std::size_t kDefaultFinisherOffset = 24;
@@ -85,6 +86,7 @@ constexpr std::uint32_t kClassRow = 0x808074FAU;
 constexpr std::size_t kUseConditionPointer = 24;
 constexpr std::uint32_t kUseConditionClass = 0x80802980U;
 
+/** Appends within a bank's capacity; an allocation failure is refused rather than thrown. */
 template <typename T> bool append(std::vector<T>& bank, T value, std::size_t capacity) noexcept {
     if (bank.size() >= capacity) {
         return false;
@@ -97,6 +99,7 @@ template <typename T> bool append(std::vector<T>& bank, T value, std::size_t cap
     }
 }
 
+/** Reads the table an investment-root slot names, checking its class when one is expected. */
 bool root_table(const reader::Source& source,
                 reader::Scratch& scratch,
                 std::span<const std::byte> root,
@@ -110,6 +113,7 @@ bool root_table(const reader::Source& source,
            && (expectedClass == 0 || cls == expectedClass);
 }
 
+/** Reads one entry's fixed fields; a negative or non-finite weight is refused. */
 bool read_reward_entry(std::span<const std::byte> blob,
                        std::size_t at,
                        domain::Entry& entry) noexcept {
@@ -124,16 +128,11 @@ bool read_reward_entry(std::span<const std::byte> blob,
 
 /** Reads the single flag that gates use of the class's default finisher. */
 bool read_class_flag(std::span<const std::byte> blob, std::uint16_t& output) noexcept {
-    std::int64_t relative = 0;
-    if (!tables::read(blob, kUseConditionPointer, relative) || relative <= 0
-        || static_cast<std::uint64_t>(relative) > blob.size()
-        || kUseConditionPointer > blob.size() - static_cast<std::size_t>(relative)) {
-        return false;
-    }
-    const auto at = kUseConditionPointer + static_cast<std::size_t>(relative);
+    std::size_t at = 0;
     std::uint32_t cls = 0;
     tables::Array expression{};
-    if (!tables::read(blob, at - kDefinitionClassPrefixSize, cls) || cls != kUseConditionClass
+    if (!tables::relative(blob, kUseConditionPointer, at) || at < kDefinitionClassPrefixSize
+        || !tables::read(blob, at - kDefinitionClassPrefixSize, cls) || cls != kUseConditionClass
         || !tables::read_array(
             blob, at, kExpressionClass, tables::kUnlockInstructionStride, expression)
         || expression.count != 1) {
@@ -142,7 +141,7 @@ bool read_class_flag(std::span<const std::byte> blob, std::uint16_t& output) noe
     std::uint32_t opcode = 0;
     std::uint32_t flag = domain::kAbsent;
     if (!tables::read(blob, expression.dataOffset, opcode)
-        || opcode != static_cast<std::uint32_t>(tables::UnlockOpcode::flag)
+        || opcode != tables::kUnlockReadFlagOpcode
         || !tables::read(
             blob, expression.dataOffset + tables::kUnlockInstructionOperandOffset, flag)
         || flag >= domain::kAbsent) {
@@ -267,55 +266,50 @@ bool RewardConditions::load(const reader::Source& source,
                                  expressionRows_);
 }
 
-bool RewardConditions::bind(domain::Instruction& instruction) const noexcept {
-    const auto opcode = static_cast<tables::UnlockOpcode>(instruction.opcode);
-    const bool flag = opcode == tables::UnlockOpcode::flag;
-    if (!flag && opcode != tables::UnlockOpcode::loadValue) {
-        return true;
+bool RewardConditions::bind(std::uint32_t native,
+                            std::uint32_t operand,
+                            domain::Instruction& instruction) const noexcept {
+    const bool flag = native == tables::kUnlockReadFlagOpcode;
+    if (!flag && native != tables::kUnlockReadValueOpcode) {
+        instruction = {{}, unlocks::Bank::none, operand};
+        return unlocks::decode_opcode(native, instruction.opcode);
     }
     const auto& rows = flag ? flagRows_ : valueRows_;
     const std::span<const std::byte> blob = flag ? flags_ : values_;
-    if (instruction.operand >= rows.count) {
-        return false;
-    }
-    const std::size_t at = rows.dataOffset + instruction.operand * kBindingStride;
     std::uint32_t hash = 0;
-    if (!tables::read(blob, at, hash)) {
+    if (operand >= rows.count
+        || !tables::read(blob, rows.dataOffset + operand * kBindingStride, hash)) {
         return false;
     }
-    using Read = domain::BankRead;
+    instruction.opcode = flag ? unlocks::Opcode::flag : unlocks::Opcode::loadValue;
     if (flag) {
         for (std::size_t characterClass = 0; characterClass < classFlags_.size();
              ++characterClass) {
             if (classFlags_[characterClass] != domain::kAbsent
-                && instruction.operand == classFlags_[characterClass]) {
-                instruction = {static_cast<std::uint32_t>(Read::characterClass),
-                               static_cast<std::uint32_t>(characterClass)};
+                && operand == classFlags_[characterClass]) {
+                instruction.bank = unlocks::Bank::characterClass;
+                instruction.operand = static_cast<std::uint32_t>(characterClass);
                 return true;
             }
         }
     }
-    const auto& account = flag ? maps_->accountFlag : maps_->accountValue;
-    const auto& character = flag ? maps_->characterFlag : maps_->characterValue;
-    const auto accountIndex = bank_index(account, static_cast<std::int32_t>(instruction.operand));
+    const auto slot = static_cast<std::int32_t>(operand);
+    const auto accountIndex = bank_index(flag ? maps_->accountFlag : maps_->accountValue, slot);
+    const auto profileIndex = flag ? bank_index(maps_->profileFlag, slot) : kUnmappedSlot;
     const auto characterIndex =
-        bank_index(character, static_cast<std::int32_t>(instruction.operand));
+        bank_index(flag ? maps_->characterFlag : maps_->characterValue, slot);
     if (accountIndex != kUnmappedSlot) {
-        instruction = {static_cast<std::uint32_t>(flag ? Read::accountFlag : Read::accountValue),
-                       accountIndex};
-    } else if (flag
-               && bank_index(maps_->profileFlag, static_cast<std::int32_t>(instruction.operand))
-                      != kUnmappedSlot) {
-        instruction = {
-            static_cast<std::uint32_t>(Read::profileFlag),
-            bank_index(maps_->profileFlag, static_cast<std::int32_t>(instruction.operand))};
+        instruction.bank = unlocks::Bank::account;
+        instruction.operand = accountIndex;
+    } else if (profileIndex != kUnmappedSlot) {
+        instruction.bank = unlocks::Bank::profile;
+        instruction.operand = profileIndex;
     } else if (characterIndex != kUnmappedSlot) {
-        instruction = {
-            static_cast<std::uint32_t>(flag ? Read::characterFlag : Read::characterValue),
-            characterIndex};
+        instruction.bank = unlocks::Bank::character;
+        instruction.operand = characterIndex;
     } else {
-        instruction = {static_cast<std::uint32_t>(flag ? Read::externalFlag : Read::externalValue),
-                       hash};
+        instruction.bank = unlocks::Bank::external;
+        instruction.operand = hash;
     }
     return true;
 }
@@ -331,30 +325,29 @@ bool RewardConditions::append_expression(std::span<const std::byte> blob,
         return false;
     }
     for (std::size_t i = 0; i < rows.count; ++i) {
-        domain::Instruction instruction{};
-        if (!tables::read(
-                blob, rows.dataOffset + i * tables::kUnlockInstructionStride, instruction.opcode)
-            || !tables::read(blob,
-                             rows.dataOffset + i * tables::kUnlockInstructionStride
-                                 + tables::kUnlockInstructionOperandOffset,
-                             instruction.operand)) {
+        const std::size_t row = rows.dataOffset + i * tables::kUnlockInstructionStride;
+        std::uint32_t native = 0;
+        std::uint32_t operand = 0;
+        if (!tables::read(blob, row, native)
+            || !tables::read(blob, row + tables::kUnlockInstructionOperandOffset, operand)) {
             return false;
         }
-        if (static_cast<tables::UnlockOpcode>(instruction.opcode)
-            == tables::UnlockOpcode::expression) {
+        if (native == tables::kUnlockExpressionOpcode) {
             const auto before = bank.size();
-            if (instruction.operand >= expressionRows_.count
+            if (operand >= expressionRows_.count
                 || !append_expression(expressions_,
-                                      expressionRows_.dataOffset
-                                          + instruction.operand * kExpressionRowStride
+                                      expressionRows_.dataOffset + operand * kExpressionRowStride
                                           + kExpressionBodyOffset,
                                       bank,
                                       depth + 1)
                 || bank.size() == before) {
                 return false;
             }
-        } else if (!bind(instruction) || !domain::valid_instruction(instruction)
-                   || !append(bank, instruction, domain::kInstructionCapacity)) {
+            continue;
+        }
+        domain::Instruction instruction{};
+        if (!bind(native, operand, instruction) || !unlocks::valid(instruction)
+            || !append(bank, instruction, domain::kInstructionCapacity)) {
             return false;
         }
     }
@@ -396,8 +389,7 @@ bool RewardConditions::read_list(std::span<const std::byte> blob,
         // Every expression attached to a progression reward must hold.
         if (i != 0
             && !append(instructions,
-                       domain::Instruction{
-                           static_cast<std::uint32_t>(tables::UnlockOpcode::logicalAnd), 0},
+                       domain::Instruction{unlocks::Opcode::logicalAnd, unlocks::Bank::none, 0},
                        output.size())) {
             return false;
         }
@@ -501,30 +493,29 @@ bool RewardBuild::read_item(std::uint32_t hash,
                             std::span<const std::byte> blob,
                             domain::Item& item) noexcept {
     std::uint16_t acquired = domain::kAbsent;
-    std::int64_t relative = 0;
+    std::int64_t wrapper = 0;
     std::uint32_t cls = 0;
-    if (!tables::read(blob, kWrapperField, relative)
+    if (!tables::read(blob, kWrapperField, wrapper)
         || !tables::read(blob, kAcquiredFlagField, acquired)) {
         return false;
     }
     item.definitionHash = hash;
     if (acquired != domain::kAbsent) {
-        domain::Instruction flag{static_cast<std::uint32_t>(tables::UnlockOpcode::flag), acquired};
-        if (!conditions.bind(flag) || !domain::valid_instruction(flag)) {
+        domain::Instruction flag{};
+        if (!conditions.bind(tables::kUnlockReadFlagOpcode, acquired, flag)
+            || !unlocks::valid(flag)) {
             return false;
         }
-        if (flag.opcode == static_cast<std::uint32_t>(domain::BankRead::accountFlag)) {
+        if (flag.bank == unlocks::Bank::account) {
             item.acquiredFlag = static_cast<std::uint16_t>(flag.operand);
         }
     }
-    if (relative != 0) {
-        if (relative < 0 || static_cast<std::uint64_t>(relative) > blob.size()
-            || kWrapperField > blob.size() - static_cast<std::size_t>(relative)) {
-            return false;
-        }
-        const auto at = kWrapperField + static_cast<std::size_t>(relative);
+    // A zero delta means the item is not a wrapper.
+    if (wrapper != 0) {
+        std::size_t at = 0;
         tables::Array selections{};
-        if (!tables::read(blob, at - kDefinitionClassPrefixSize, cls) || cls != kWrapperClass
+        if (!tables::relative(blob, kWrapperField, at) || at < kDefinitionClassPrefixSize
+            || !tables::read(blob, at - kDefinitionClassPrefixSize, cls) || cls != kWrapperClass
             || !tables::read(blob, at, item.poolIndex)
             || !tables::read(blob, at + kWrapperFlagsOffset, item.flags)
             || !tables::read_array(
@@ -581,7 +572,7 @@ bool RewardBuild::publish() noexcept {
                          && (row.poolIndex == domain::kAbsent || row.poolIndex < pools_.size());
             for (const auto& socket :
                  std::span(sockets_).subspan(row.sockets.first, row.sockets.count)) {
-                valid &= socket.plugItem == domain::kAbsent || socket.plugItem < items_.size();
+                valid &= domain::valid_socket(socket, items_.size());
             }
             if (valid) {
                 auto retained = row;

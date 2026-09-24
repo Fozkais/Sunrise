@@ -5,22 +5,31 @@
 #include <cstdint>
 #include <span>
 
+#include "../../unlocks/unlocks_expression.h"
+#include "../items/details/definition.h"
+#include "../items/item_catalog.h"
+
 namespace sunrise::state::build_data::rewards {
 
 /** Native references use all bits set for an absent row. */
 inline constexpr std::uint16_t kAbsent = 0xFFFF;
-/** Bounds cover signed native indices and the flat banks they reference. */
+/** The shipped build declares 979 pools. The domain leaves room above that. */
 inline constexpr std::size_t kPoolCapacity = 4096;
+/** Item rows are dense over the installed item-definition table. */
+inline constexpr std::size_t kItemCapacity = items::kDefinitionCapacity;
+/**
+ * The shipped build declares 10,549 entries, 14,185 condition instructions, 3,714 modifiers, and
+ * 1,812 socket overrides. Each bank leaves room above that.
+ */
 inline constexpr std::size_t kEntryCapacity = 32768;
-inline constexpr std::size_t kItemCapacity = 32768;
-inline constexpr std::size_t kInstructionCapacity = 131072;
+inline constexpr std::size_t kInstructionCapacity = 32768;
 inline constexpr std::size_t kModifierCapacity = 32768;
 inline constexpr std::size_t kSocketOverrideCapacity = 32768;
-/** Native reward overrides address the 12 ordinary sockets on an item. */
-inline constexpr std::size_t kSocketsPerItem = 12;
-/** A wrapper can select independently from four reward categories. */
+/** Reward overrides address the ordinary socket lanes an item's initial plugs fill. */
+inline constexpr std::size_t kSocketsPerItem = items::details::kInitialPlugCapacity;
+/** Category selections one wrapper declares. The most any shipped wrapper declares is four. */
 inline constexpr std::size_t kSelectionCapacity = 4;
-/** A resolved grant fits one bounded inventory transaction. */
+/** Rows one grant may publish: one push's 16-record character and profile change lists. */
 inline constexpr std::size_t kGrantCapacity = 32;
 /** Nested pools and referenced conditions share a bounded traversal depth. */
 inline constexpr std::size_t kTraversalDepth = 32;
@@ -30,22 +39,8 @@ struct Range {
     std::uint32_t count{};
 };
 
-struct Instruction {
-    std::uint32_t opcode{};
-    std::uint32_t operand{};
-};
-
-/** Resolved bank reads occupy a separate range from native expression operators. */
-enum class BankRead : std::uint32_t {
-    accountFlag = 256,
-    characterFlag,
-    accountValue,
-    characterValue,
-    externalFlag,
-    externalValue,
-    characterClass,
-    profileFlag,
-};
+/** Reward and pass conditions are unlock expressions bound to their saved banks. */
+using Instruction = unlocks::Instruction;
 
 /** A fixed override names its plug directly rather than selecting from a set. */
 inline constexpr std::uint32_t kFixedPlugSelection = 0xFFFFFFFFU;
@@ -111,6 +106,13 @@ struct View {
 
 template <typename T> [[nodiscard]] constexpr bool fits(Range range, std::span<T> bank) noexcept {
     return range.first <= bank.size() && range.count <= bank.size() - range.first;
+}
+
+/** An override names a socket type and, when it fixes a plug, an item that was read. */
+[[nodiscard]] constexpr bool valid_socket(const SocketOverride& socket,
+                                          std::size_t itemCount) noexcept {
+    return socket.socketType != kAbsent
+           && (socket.plugItem == kAbsent || socket.plugItem < itemCount);
 }
 
 } // namespace sunrise::state::build_data::rewards

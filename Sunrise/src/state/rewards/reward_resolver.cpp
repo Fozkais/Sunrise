@@ -2,9 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
-#include "../build_data/rewards/reward_catalog.h"
-#include "middleware/content/packages/tables/unlock_opcode.h"
+#include "../build_data/runtime.h"
+#include "../unlocks/unlocks_expression.h"
 
 namespace sunrise::state::rewards {
 namespace {
@@ -12,10 +13,11 @@ namespace {
 namespace definitions = build_data::rewards;
 /** The empty category tag matches every wrapper selection. */
 constexpr std::uint32_t kEmptyTag = 0x811C9DC5U;
-/** Native postfix expressions use at most 256 signed 32-bit stack values. */
-constexpr std::size_t kExpressionCapacity = 256;
 /** Native wrappers retain up to 64 selections, including rows without an item grant. */
 constexpr std::size_t kDrawCapacity = 64;
+/** A grant quantity is published as a signed 32-bit stack size. */
+constexpr auto kMaximumQuantity =
+    static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)());
 
 bool refuse(const Context& context, const char* reason) noexcept {
     if (context.refusal != nullptr) {
@@ -24,133 +26,77 @@ bool refuse(const Context& context, const char* reason) noexcept {
     return false;
 }
 
-bool apply_condition_operator(const definitions::Instruction& instruction,
-                              std::span<std::int32_t> stack,
-                              std::size_t& size,
-                              const Context& context) noexcept {
-    if (!definitions::valid_instruction(instruction)) {
-        return refuse(context, "condition_opcode");
-    }
-    using Op = middleware::content::packages::tables::UnlockOpcode;
-    const auto opcode = static_cast<Op>(instruction.opcode);
-    const bool unary = opcode == Op::logicalNot || opcode == Op::negate;
-    if (size < (unary ? 1U : 2U)) {
-        return refuse(context, "condition_shape");
-    }
-    const auto right = unary ? 0 : stack[--size];
-    auto& left = stack[size - 1];
-    switch (opcode) {
-    case Op::logicalNot:
-        left = left == 0;
-        break;
-    case Op::negate:
-        left = static_cast<std::int32_t>(0U - static_cast<std::uint32_t>(left));
-        break;
-    case Op::logicalOr:
-        left = left != 0 || right != 0;
-        break;
-    case Op::logicalAnd:
-        left = left != 0 && right != 0;
-        break;
-    case Op::equal:
-        left = left == right;
-        break;
-    case Op::greaterThan:
-        left = left > right;
-        break;
-    case Op::greaterOrEqual:
-        left = left >= right;
-        break;
-    case Op::lessOrEqual:
-        left = left <= right;
-        break;
-    case Op::add:
-        left = static_cast<std::int32_t>(static_cast<std::uint32_t>(left)
-                                         + static_cast<std::uint32_t>(right));
-        break;
-    case Op::lessThan:
-        left = left < right;
-        break;
+/** Reads one validated flag from the caller's unlock banks or selected character. */
+bool read_flag(const void* raw, const unlocks::Instruction& instruction, bool& set) noexcept {
+    const auto& context = *static_cast<const Context*>(raw);
+    const auto index = instruction.operand;
+    switch (instruction.bank) {
+    case unlocks::Bank::account:
+        set = context.unlocks.accountFlags[index] == unlocks::kFlagSet;
+        return true;
+    case unlocks::Bank::profile:
+        set = context.unlocks.profileFlags[index] == unlocks::kFlagSet;
+        return true;
+    case unlocks::Bank::character:
+        set = context.unlocks.characterObjectFlags[index] == unlocks::kFlagSet;
+        return true;
+    case unlocks::Bank::characterClass:
+        set = index == static_cast<std::uint32_t>(context.characterClass);
+        return true;
     default:
-        return refuse(context, "condition_opcode");
+        return false;
     }
-    return true;
+}
+
+/** Reads one validated value from the caller's unlock banks. */
+bool read_value(const void* raw,
+                const unlocks::Instruction& instruction,
+                std::int32_t& value) noexcept {
+    const auto& context = *static_cast<const Context*>(raw);
+    switch (instruction.bank) {
+    case unlocks::Bank::account:
+        value = context.unlocks.objectiveValues[instruction.operand];
+        return true;
+    case unlocks::Bank::character:
+        value = context.unlocks.characterObjectValues[instruction.operand];
+        return true;
+    default:
+        return false;
+    }
+}
+
+/** An empty program is unconditional; external identities are not in the saved banks. */
+bool condition(std::span<const definitions::Instruction> program,
+               const Context& context,
+               bool& result) noexcept {
+    result = program.empty();
+    if (program.empty()) {
+        return true;
+    }
+    for (const auto& instruction : program) {
+        if (!unlocks::valid(instruction)) {
+            return refuse(context, "condition_shape");
+        }
+        if (instruction.bank == unlocks::Bank::external) {
+            return refuse(context,
+                          instruction.opcode == unlocks::Opcode::flag ? "external_flag"
+                                                                      : "external_value");
+        }
+    }
+    const unlocks::Inputs inputs{read_flag, read_value, &context};
+    return unlocks::evaluate(program, inputs, result) || refuse(context, "condition_shape");
 }
 
 bool condition(definitions::View data,
                definitions::Range expression,
                const Context& context,
                bool& result) noexcept {
-    result = expression.count == 0;
     if (!definitions::fits(expression, data.instructions)) {
+        result = false;
         return refuse(context, "condition_shape");
     }
-    std::array<std::int32_t, kExpressionCapacity> stack{};
-    std::size_t size = 0;
-    for (const auto& instruction : data.instructions.subspan(expression.first, expression.count)) {
-        const auto operand = instruction.operand;
-        std::int32_t value = 0;
-        using Read = definitions::BankRead;
-        using Op = middleware::content::packages::tables::UnlockOpcode;
-        switch (instruction.opcode) {
-        case static_cast<std::uint32_t>(Read::accountFlag):
-            if (operand >= context.unlocks.accountFlags.size()) {
-                return refuse(context, "condition_shape");
-            }
-            value = context.unlocks.accountFlags[operand] == unlocks::kFlagSet;
-            break;
-        case static_cast<std::uint32_t>(Read::profileFlag):
-            if (operand >= context.unlocks.profileFlags.size()) {
-                return refuse(context, "condition_shape");
-            }
-            value = context.unlocks.profileFlags[operand] == unlocks::kFlagSet;
-            break;
-        case static_cast<std::uint32_t>(Read::characterFlag):
-            if (operand >= context.unlocks.characterObjectFlags.size()) {
-                return refuse(context, "condition_shape");
-            }
-            value = context.unlocks.characterObjectFlags[operand] == unlocks::kFlagSet;
-            break;
-        case static_cast<std::uint32_t>(Read::accountValue):
-            if (operand >= context.unlocks.objectiveValues.size()) {
-                return refuse(context, "condition_shape");
-            }
-            value = context.unlocks.objectiveValues[operand];
-            break;
-        case static_cast<std::uint32_t>(Read::characterValue):
-            if (operand >= context.unlocks.characterObjectValues.size()) {
-                return refuse(context, "condition_shape");
-            }
-            value = context.unlocks.characterObjectValues[operand];
-            break;
-        case static_cast<std::uint32_t>(Read::characterClass):
-            value = operand == static_cast<std::uint32_t>(context.characterClass);
-            break;
-        case static_cast<std::uint32_t>(Op::constant):
-            value = static_cast<std::int32_t>(operand);
-            break;
-        case static_cast<std::uint32_t>(Read::externalFlag):
-            return refuse(context, "external_flag");
-        case static_cast<std::uint32_t>(Read::externalValue):
-            return refuse(context, "external_value");
-        default:
-            if (!apply_condition_operator(instruction, stack, size, context)) {
-                return false;
-            }
-            continue;
-        }
-        if (size == stack.size()) {
-            return refuse(context, "condition_shape");
-        }
-        stack[size++] = value;
-    }
-    if (expression.count != 0) {
-        if (size != 1) {
-            return refuse(context, "condition_shape");
-        }
-        result = stack[0] != 0;
-    }
-    return true;
+    return condition(
+        data.instructions.subspan(expression.first, expression.count), context, result);
 }
 
 struct Resolver {
@@ -300,7 +246,7 @@ struct Resolver {
         if (chosen->itemIndex == definitions::kAbsent) {
             return true;
         }
-        if (chosen->quantity == 0 || chosen->quantity > INT32_MAX
+        if (chosen->quantity == 0 || chosen->quantity > kMaximumQuantity
             || result.count == result.grants.size()
             || !definitions::fits(chosen->sockets, data.sockets)) {
             return false;
@@ -327,7 +273,7 @@ bool resolve_item(definitions::View data,
     if (context.refusal != nullptr) {
         *context.refusal = "reward_shape";
     }
-    if (itemIndex >= data.items.size() || quantity == 0 || quantity > INT32_MAX) {
+    if (itemIndex >= data.items.size() || quantity == 0 || quantity > kMaximumQuantity) {
         return false;
     }
     const auto& item = data.items[itemIndex];
@@ -382,12 +328,7 @@ bool resolve_item(definitions::View data,
 bool eligible(std::span<const definitions::Instruction> instructions,
               const Context& context,
               bool& result) noexcept {
-    definitions::View view{};
-    view.instructions = instructions;
-    if (instructions.size() > UINT32_MAX) {
-        return false;
-    }
-    return condition(view, {0, static_cast<std::uint32_t>(instructions.size())}, context, result);
+    return condition(instructions, context, result);
 }
 
 bool resolve(const Context& context,
@@ -404,10 +345,11 @@ bool resolve(const Context& context,
     if (context.refusal != nullptr) {
         *context.refusal = "reward_item";
     }
-    return definitions::read(&request, [](void* raw, definitions::View data) noexcept {
-        auto& value = *static_cast<Request*>(raw);
-        return resolve_item(data, value.context, value.item, value.quantity, value.result);
-    });
+    return build_data::read_reward_definitions(
+        &request, [](void* raw, definitions::View data) noexcept {
+            auto& value = *static_cast<Request*>(raw);
+            return resolve_item(data, value.context, value.item, value.quantity, value.result);
+        });
 }
 
 } // namespace sunrise::state::rewards

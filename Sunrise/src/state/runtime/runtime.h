@@ -25,8 +25,9 @@ struct SettingsDelta;
 
 namespace sunrise::state {
 
-/** Acquisition planner selected from installed wrapper, quest and bucket definitions. */
+/** Which prepare path grants one installed item. */
 enum class ItemGrantRoute : std::uint8_t { unavailable, quest, profile, reward };
+/** Chooses the prepare path from the item's wrapper, quest setup and bucket. */
 [[nodiscard]] ItemGrantRoute item_grant_route(std::uint16_t itemIndex) noexcept;
 /**
  * Assigns runtime SOIDs only to installed profile mod/shader rows which are socket action sources.
@@ -264,7 +265,7 @@ struct PendingRecordRewardGrant {
     bool prepared{};
 };
 
-/** One uncommitted Season reward and the exact native row or bundle it will claim. */
+/** One uncommitted Season reward, the native row it will claim, and the seed of its draw. */
 struct PendingSeasonPassReward {
     PendingRecordRewardGrant grant{};
     std::uint32_t sourceDefinitionHash{};
@@ -535,15 +536,26 @@ prepare_item_acquisition(std::uint16_t collectibleIndex,
 
 /** Atomically commits one prepared reward grant and its durable Season claim. */
 [[nodiscard]] bool commit_season_pass_reward(PendingSeasonPassReward& mutation) noexcept;
-/** Resolves an installed item or wrapper; refusal receives a static reason on failure. */
+/**
+ * Resolves an installed item or wrapper for the selected character.
+ * @param seed Caller-drawn entropy for any wrapper draws.
+ * @param refusal Receives a static reason on failure.
+ */
 [[nodiscard]] bool prepare_item_reward(std::uint16_t itemIndex,
                                        std::uint32_t quantity,
+                                       std::uint64_t seed,
                                        PendingRecordRewardGrant& mutation,
                                        const char** refusal = nullptr) noexcept;
-/** Prepares an eligible native pass row without writing its claim or acquisition flags. */
+/**
+ * Prepares an eligible native pass row without writing its claim or acquisition flags.
+ * @param seed Caller-drawn entropy; the commit replays the same draw from it.
+ * @param refusal Receives a static reason on failure.
+ */
 [[nodiscard]] bool prepare_season_pass_reward(std::uint16_t rewardIndex,
+                                              std::uint64_t seed,
                                               PendingSeasonPassReward& mutation,
                                               const char** refusal = nullptr) noexcept;
+/** Applies a prepared grant's acquisition flags to the saved banks; false if one moved. */
 [[nodiscard]] bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
                                           unlocks::Table& after) noexcept;
 

@@ -4,8 +4,6 @@
 #include <cstdint>
 #include <span>
 
-#include "unlock_opcode.h"
-
 namespace sunrise::middleware::content::packages::tables {
 
 /** Definition tags sit in this closed range. */
@@ -97,26 +95,27 @@ inline constexpr std::size_t kUnlockInstructionOperandOffset = 4;
 /** An expression field is a 64-bit count then a 64-bit self-relative offset. */
 inline constexpr std::size_t kUnlockExpressionFieldSize = 16;
 inline constexpr std::size_t kUnlockExpressionPointerOffset = 8;
+/**
+ * Record and node field detection accepts a field only when every opcode is at most 20. This is a
+ * detection bound, not the opcode range: installed reward conditions also use opcode 22.
+ */
+inline constexpr std::uint32_t kUnlockOpcodeCeiling = 20;
 /** The opcode that reads a value slot. */
-inline constexpr std::uint32_t kUnlockReadValueOpcode =
-    static_cast<std::uint32_t>(UnlockOpcode::loadValue);
+inline constexpr std::uint32_t kUnlockReadValueOpcode = 10;
 /** The opcode that tests a flag. */
-inline constexpr std::uint32_t kUnlockReadFlagOpcode =
-    static_cast<std::uint32_t>(UnlockOpcode::flag);
+inline constexpr std::uint32_t kUnlockReadFlagOpcode = 1;
 /** The opcode that pushes a literal. */
-inline constexpr std::uint32_t kUnlockLiteralOpcode =
-    static_cast<std::uint32_t>(UnlockOpcode::constant);
+inline constexpr std::uint32_t kUnlockLiteralOpcode = 11;
+/** The opcode that expands a shared expression row. Its operand is the row index. */
+inline constexpr std::uint32_t kUnlockExpressionOpcode = 12;
 /** The opcode that tests greater than or equal. */
-inline constexpr std::uint32_t kUnlockGreaterEqualOpcode =
-    static_cast<std::uint32_t>(UnlockOpcode::greaterOrEqual);
+inline constexpr std::uint32_t kUnlockGreaterEqualOpcode = 14;
 /** The opcode that inverts the value on top of the stack. Its operand is unused. */
-inline constexpr std::uint32_t kUnlockNotOpcode =
-    static_cast<std::uint32_t>(UnlockOpcode::logicalNot);
+inline constexpr std::uint32_t kUnlockNotOpcode = 2;
 /** The opcode that folds the top two values with logical and. */
-inline constexpr std::uint32_t kUnlockAndOpcode =
-    static_cast<std::uint32_t>(UnlockOpcode::logicalAnd);
+inline constexpr std::uint32_t kUnlockAndOpcode = 4;
 /** The opcode that tests the top two values for equality. */
-inline constexpr std::uint32_t kUnlockEqualOpcode = static_cast<std::uint32_t>(UnlockOpcode::equal);
+inline constexpr std::uint32_t kUnlockEqualOpcode = 8;
 /** High half every installed array marker and element class carries. */
 inline constexpr std::uint32_t kDefinitionClassHigh = 0x8080U;
 /** Shift that leaves `kDefinitionClassHigh` from a marker or element class. */
@@ -135,7 +134,10 @@ inline constexpr std::size_t kNodeExpressionFieldAlternate = 48;
 /** Records a node owns, four bytes each as a row then a gate. */
 inline constexpr std::size_t kNodeChildRecordField = 136;
 inline constexpr std::size_t kNodeChildRecordStride = 4;
-/** Array descriptor of the account object's profile unlock flag mapping table. */
+/**
+ * Array descriptor of the profile flag mapping table, between the account (+8) and character (+40)
+ * maps. Profile flags are account-wide but saved in their own bank, not the account flag bank.
+ */
 inline constexpr std::size_t kProfileFlagMapDescriptor = 24;
 /** Array descriptor of the character object's flag mapping table, sized to that bank. */
 inline constexpr std::size_t kCharacterFlagMapDescriptor = 40;

@@ -1,10 +1,11 @@
 #include <memory>
-#include <mutex>
 #include <new>
+#include <span>
 
+#include "../../core/logging/log.h"
+#include "../../middleware/crypto/random_bytes.h"
 #include "../../state/build_data/runtime.h"
 #include "../../state/investment/store_internal.h"
-#include "core/logging/log.h"
 #include "internal.h"
 
 namespace sunrise::server::bap {
@@ -27,10 +28,14 @@ bool commit_world_reward(const WorldRewardRequest& request) noexcept {
         } else {
             const std::unique_ptr<state::PendingRecordRewardGrant> grant(
                 new (std::nothrow) state::PendingRecordRewardGrant);
-            const char* reason = "reward_allocation";
-            committed = grant && request.quantity > 0
+            std::uint64_t seed = 0;
+            const bool seeded =
+                middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)));
+            const char* reason = seeded ? "reward_allocation" : "random_source";
+            committed = seeded && grant && request.quantity > 0
                         && state::prepare_item_reward(request.itemDefinitionIndex,
                                                       static_cast<std::uint32_t>(request.quantity),
+                                                      seed,
                                                       *grant,
                                                       &reason);
             if (committed) {
@@ -68,6 +73,7 @@ bool enqueue_world_reward(std::uint16_t definitionIndex,
 
 } // namespace
 
+/** Logs one refused reward stage with its native index and a specific reason. */
 void report_reward_refusal(const char* stage, std::uint16_t index, const char* reason) noexcept {
     core::log::writef(core::log::Channel::server,
                       core::log::Level::warn,
