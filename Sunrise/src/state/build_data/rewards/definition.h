@@ -69,7 +69,9 @@ struct Modifier {
 struct Entry {
     std::uint16_t itemIndex{kAbsent};
     std::uint16_t poolIndex{kAbsent};
-    std::uint16_t mappingIndex{kAbsent};
+    std::uint16_t supplementalIndex{kAbsent};
+    /** True only when the source bank is explicitly absent from the investment root. */
+    bool supplementalMissing{};
     std::uint32_t quantity{};
     std::uint32_t categoryHash{};
     float weight{};

@@ -62,6 +62,7 @@ private:
                                  std::span<const std::byte> blob,
                                  state::build_data::rewards::Item& item) noexcept;
     bool loaded_{};
+    bool supplementalMissing_{};
     std::vector<state::build_data::rewards::Pool> pools_;
     std::vector<state::build_data::rewards::Entry> entries_;
     std::vector<state::build_data::rewards::Item> items_;

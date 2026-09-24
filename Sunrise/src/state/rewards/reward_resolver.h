@@ -6,9 +6,6 @@
 
 namespace sunrise::state::rewards {
 
-/** Pass engrams select equipment; ordinary acquisitions expand every declared lane. */
-enum class Selection : std::uint8_t { all, equipment };
-
 struct Grant {
     std::uint16_t itemIndex{build_data::rewards::kAbsent};
     std::int32_t quantity{};
@@ -38,7 +35,6 @@ struct Context {
 [[nodiscard]] bool resolve(const Context& context,
                            std::uint16_t itemIndex,
                            std::uint32_t quantity,
-                           Selection selection,
                            Result& result) noexcept;
 
 } // namespace sunrise::state::rewards

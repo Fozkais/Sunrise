@@ -63,6 +63,7 @@ bool valid_depth(View data,
 bool valid_entry(View data, const Entry& entry) noexcept {
     return (entry.itemIndex == kAbsent || entry.itemIndex < data.items.size())
            && (entry.poolIndex == kAbsent || entry.poolIndex < data.pools.size())
+           && (!entry.supplementalMissing || entry.supplementalIndex != kAbsent)
            && fits(entry.condition, data.instructions) && fits(entry.modifiers, data.modifiers)
            && fits(entry.sockets, data.sockets) && std::isfinite(entry.weight) && entry.weight >= 0;
 }

@@ -27,8 +27,6 @@ inline constexpr std::uint32_t kSmallProfileSlotCapacity = 6;
 inline constexpr std::uint8_t kUnavailableBucketId = (std::numeric_limits<std::uint8_t>::max)();
 /** Hidden plugs, perks and quest roots use this bucket instead of held inventory. */
 inline constexpr std::uint8_t kNonInventoryBucketId = 37;
-/** Character bucket containing unopened engrams. */
-inline constexpr std::uint8_t kEngramBucketId = 31;
 /** Leaving out the unavailable id leaves at most 255 unique bucket records. */
 inline constexpr std::size_t kDescriptorCapacity = kUnavailableBucketId;
 /** Signed -1 marks a bucket that has no equipment slot. */

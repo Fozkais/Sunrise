@@ -171,13 +171,9 @@ enum class PassResolution { claim, replay };
         || !enabled) {
         return false;
     }
-    build_data::items::Definition item{};
-    const bool engram = build_data::find_item_definition_index(reward.itemIndex, item)
-                        && item.bucketId == inventory_buckets::kEngramBucketId;
     if (!rewards::resolve({flags, account.characters[character].characterClass, seed, reason},
                           reward.itemIndex,
                           reward.quantity,
-                          engram ? rewards::Selection::equipment : rewards::Selection::all,
                           result)) {
         return false;
     }
@@ -340,7 +336,6 @@ bool prepare_item_reward(std::uint16_t itemIndex,
     if (!rewards::resolve({flags, account.characters[character].characterClass, seed, &reason},
                           itemIndex,
                           quantity,
-                          rewards::Selection::all,
                           resolved)) {
         return false;
     }

@@ -32,7 +32,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 68;
+inline constexpr std::uint32_t kCacheFormatVersion = 69;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -622,7 +622,8 @@ struct RewardPoolRecord {
 struct RewardEntryRecord {
     std::uint16_t itemIndex{};
     std::uint16_t poolIndex{};
-    std::uint16_t mappingIndex{};
+    std::uint16_t supplementalIndex{};
+    std::uint8_t supplementalMissing{};
     std::uint32_t quantity{};
     std::uint32_t categoryHash{};
     float weight{};
@@ -655,7 +656,7 @@ static_assert(sizeof(RewardRangeRecord) == 2 * sizeof(std::uint32_t));
 static_assert(sizeof(RewardPoolRecord) == sizeof(std::uint32_t) + sizeof(RewardRangeRecord));
 static_assert(sizeof(RewardEntryRecord)
               == 3 * sizeof(std::uint16_t) + 2 * sizeof(std::uint32_t) + sizeof(float)
-                     + 3 * sizeof(RewardRangeRecord));
+                     + sizeof(std::uint8_t) + 3 * sizeof(RewardRangeRecord));
 static_assert(sizeof(RewardItemRecord)
               == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t) + sizeof(std::uint8_t)
                      + rewards::kSelectionCapacity * sizeof(RewardSelectionRecord));

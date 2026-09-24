@@ -19,10 +19,13 @@ namespace tables = middleware::content::packages::tables;
 namespace domain = state::build_data::rewards;
 
 /** Investment-root slots identify reward pools and unlock-slot bindings. */
+constexpr std::size_t kSupplementalRewardSlot = 84;
 constexpr std::size_t kPoolSlot = 88;
 constexpr std::size_t kExpressionSlot = 109;
 constexpr std::size_t kFlagSlot = 112;
 constexpr std::size_t kValueSlot = 114;
+/** Only the omitted-bank sentinel permits a no-op; other invalid tags leave effects unresolved. */
+constexpr std::uint32_t kAbsentTableTag = 0xFFFFFFFFU;
 /** Native reward schema classes and fixed row sizes. */
 constexpr std::uint32_t kPoolClass = 0x80807553U;
 constexpr std::uint32_t kPoolRowClass = 0x8080748CU;
@@ -53,7 +56,7 @@ constexpr std::size_t kAcquiredFlagField = 0xDA;
 /** Byte offsets inside the serialized reward rows. */
 constexpr std::size_t kEntryQuantityOffset = 4;
 constexpr std::size_t kEntryPoolOffset = 8;
-constexpr std::size_t kEntryMappingOffset = 10;
+constexpr std::size_t kEntrySupplementalOffset = 10;
 constexpr std::size_t kEntryCategoryOffset = 20;
 constexpr std::size_t kEntryWeightOffset = 24;
 constexpr std::size_t kEntryConditionOffset = 32;
@@ -113,7 +116,7 @@ bool read_reward_entry(std::span<const std::byte> blob,
     return tables::read(blob, at, entry.itemIndex)
            && tables::read(blob, at + kEntryQuantityOffset, entry.quantity)
            && tables::read(blob, at + kEntryPoolOffset, entry.poolIndex)
-           && tables::read(blob, at + kEntryMappingOffset, entry.mappingIndex)
+           && tables::read(blob, at + kEntrySupplementalOffset, entry.supplementalIndex)
            && tables::read(blob, at + kEntryCategoryOffset, entry.categoryHash)
            && tables::read(blob, at + kEntryWeightOffset, entry.weight)
            && std::isfinite(entry.weight) && entry.weight >= 0;
@@ -157,6 +160,7 @@ bool RewardBuild::entry(std::span<const std::byte> blob, std::size_t at) noexcep
         || !conditions.read(blob, at + kEntryConditionOffset, instructions_, out.condition)) {
         return false;
     }
+    out.supplementalMissing = supplementalMissing_ && out.supplementalIndex != domain::kAbsent;
     tables::Array rows{};
     if (!tables::read_array(
             blob, at + kEntryModifiersOffset, kModifierClass, kModifierStride, rows)) {
@@ -436,6 +440,7 @@ bool RewardBuild::load(const reader::Source& source,
                        std::span<const std::byte> root,
                        const SlotMaps& maps) noexcept {
     loaded_ = false;
+    supplementalMissing_ = false;
     pools_.clear();
     entries_.clear();
     instructions_.clear();
@@ -443,13 +448,16 @@ bool RewardBuild::load(const reader::Source& source,
     sockets_.clear();
     std::vector<std::byte> blob;
     tables::Array rows{};
-    if (!conditions.load(source, scratch, root, maps)
+    std::uint32_t supplementalTag = 0;
+    if (!tables::slot_tag(root, kSupplementalRewardSlot, supplementalTag)
+        || !conditions.load(source, scratch, root, maps)
         || !root_table(source, scratch, root, kPoolSlot, blob, kPoolClass)
         || !tables::read_array(
             blob, tables::kTableArrayDescriptor, kPoolRowClass, kPoolStride, rows)
         || rows.count == 0 || rows.count > domain::kPoolCapacity) {
         return false;
     }
+    supplementalMissing_ = supplementalTag == kAbsentTableTag;
     std::size_t skipped = 0;
     for (std::size_t i = 0; i < rows.count; ++i) {
         const auto at = rows.dataOffset + i * kPoolStride;

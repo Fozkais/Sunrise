@@ -4,7 +4,6 @@
 #include <cmath>
 
 #include "../build_data/rewards/reward_catalog.h"
-#include "../build_data/runtime.h"
 #include "middleware/content/packages/tables/unlock_opcode.h"
 
 namespace sunrise::state::rewards {
@@ -15,6 +14,8 @@ namespace definitions = build_data::rewards;
 constexpr std::uint32_t kEmptyTag = 0x811C9DC5U;
 /** Native postfix expressions use at most 256 signed 32-bit stack values. */
 constexpr std::size_t kExpressionCapacity = 256;
+/** Native wrappers retain up to 64 selections, including rows without an item grant. */
+constexpr std::size_t kDrawCapacity = 64;
 
 bool refuse(const Context& context, const char* reason) noexcept {
     if (context.refusal != nullptr) {
@@ -157,9 +158,9 @@ struct Resolver {
     const Context& context;
     Result& result;
     std::uint64_t random;
-    Selection selection;
-    std::array<const definitions::Entry*, definitions::kGrantCapacity> selectedEntries{};
-    std::array<std::uint32_t, definitions::kGrantCapacity> selectedCategories{};
+    std::array<const definitions::Entry*, kDrawCapacity> selectedEntries{};
+    std::array<std::uint32_t, kDrawCapacity> selectedCategories{};
+    std::size_t selectedCount{};
 
     double fraction() noexcept {
         // SplitMix64 makes a prepared seed replayable without shared random state.
@@ -180,15 +181,8 @@ struct Resolver {
             return true;
         }
         // Draws exclude the selected pool row within its category, not every copy of its item.
-        for (std::size_t i = 0; i < result.count; ++i) {
+        for (std::size_t i = 0; i < selectedCount; ++i) {
             if (selectedEntries[i] == &entry && selectedCategories[i] == category) {
-                return true;
-            }
-        }
-        if (selection == Selection::equipment && entry.poolIndex == definitions::kAbsent) {
-            build_data::items::details::Definition item{};
-            if (!build_data::find_configured_item_detail(entry.itemIndex, item)
-                || !item.equipmentSlot.has_value()) {
                 return true;
             }
         }
@@ -225,10 +219,6 @@ struct Resolver {
         if (value == 0) {
             return true;
         }
-        // A mapping can accompany an item or nested pool; all effects belong to the grant.
-        if (entry.mappingIndex != definitions::kAbsent) {
-            return refuse(context, "reward_mapping");
-        }
         if (entry.poolIndex != definitions::kAbsent) {
             double total = 0;
             if (!pool_weight(entry.poolIndex, category, depth + 1, total)) {
@@ -241,7 +231,7 @@ struct Resolver {
             if (entry.itemIndex >= data.items.size()) {
                 return false;
             }
-        } else {
+        } else if (entry.supplementalIndex == definitions::kAbsent) {
             return refuse(context, "reward_target");
         }
         output = value;
@@ -292,19 +282,29 @@ struct Resolver {
         if (chosen == nullptr) {
             return refuse(context, "empty_pool");
         }
+        if (chosen->supplementalIndex != definitions::kAbsent && !chosen->supplementalMissing) {
+            return refuse(context, "supplemental_reward");
+        }
+        // A missing supplemental definition does not cancel the selected item grant.
         if (chosen->poolIndex != definitions::kAbsent) {
             // A pool reference selects one leaf; quantity belongs to that leaf.
             double childTotal = 0;
             return pool_weight(chosen->poolIndex, category, depth + 1, childTotal) && childTotal > 0
                    && draw(chosen->poolIndex, category, depth + 1, childTotal);
         }
+        if (selectedCount == selectedEntries.size()) {
+            return refuse(context, "reward_selection_capacity");
+        }
+        selectedEntries[selectedCount] = chosen;
+        selectedCategories[selectedCount++] = category;
+        if (chosen->itemIndex == definitions::kAbsent) {
+            return true;
+        }
         if (chosen->quantity == 0 || chosen->quantity > INT32_MAX
             || result.count == result.grants.size()
             || !definitions::fits(chosen->sockets, data.sockets)) {
             return false;
         }
-        selectedEntries[result.count] = chosen;
-        selectedCategories[result.count] = category;
         auto& grant = result.grants[result.count++];
         grant.itemIndex = chosen->itemIndex;
         grant.quantity = static_cast<std::int32_t>(chosen->quantity);
@@ -322,7 +322,6 @@ bool resolve_item(definitions::View data,
                   const Context& context,
                   std::uint16_t itemIndex,
                   std::uint32_t quantity,
-                  Selection selection,
                   Result& result) noexcept {
     result = {};
     if (context.refusal != nullptr) {
@@ -347,10 +346,10 @@ bool resolve_item(definitions::View data,
             || item.selectionCount > item.selections.size()) {
             return false;
         }
-        Resolver resolver{data, context, staged, context.seed, selection};
+        Resolver resolver{data, context, staged, context.seed};
         for (std::size_t i = 0; i < item.selectionCount; ++i) {
             const auto& declared = item.selections[i];
-            if (declared.count > staged.grants.size()) {
+            if (declared.count > kDrawCapacity) {
                 return false;
             }
             for (std::size_t j = 0; j < declared.count; ++j) {
@@ -368,7 +367,7 @@ bool resolve_item(definitions::View data,
             }
         }
         if (staged.count == 0) {
-            return false;
+            return refuse(context, "empty_reward");
         }
     }
     result = staged;
@@ -394,23 +393,20 @@ bool eligible(std::span<const definitions::Instruction> instructions,
 bool resolve(const Context& context,
              std::uint16_t itemIndex,
              std::uint32_t quantity,
-             Selection selection,
              Result& result) noexcept {
     struct Request {
         const Context& context;
         std::uint16_t item;
         std::uint32_t quantity;
-        Selection selection;
         Result& result;
-    } request{context, itemIndex, quantity, selection, result};
+    } request{context, itemIndex, quantity, result};
     result = {};
     if (context.refusal != nullptr) {
         *context.refusal = "reward_item";
     }
     return definitions::read(&request, [](void* raw, definitions::View data) noexcept {
         auto& value = *static_cast<Request*>(raw);
-        return resolve_item(
-            data, value.context, value.item, value.quantity, value.selection, value.result);
+        return resolve_item(data, value.context, value.item, value.quantity, value.result);
     });
 }
 
