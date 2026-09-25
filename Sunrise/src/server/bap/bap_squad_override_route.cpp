@@ -394,8 +394,10 @@ SquadRoute squad_route(const state::activity::SessionBinding& binding,
         return route;
     }
     std::size_t matches = 0;
+    std::size_t privateLinks = 0;
     std::uint64_t generation = 0;
     for (const Session& session : sessions()) {
+        privateLinks += live(session) ? 1U : 0U;
         if (live(session) && session.activityMemberKey == ambassador) {
             generation = session.activity.bindingGeneration;
             ++matches;
@@ -404,7 +406,10 @@ SquadRoute squad_route(const state::activity::SessionBinding& binding,
     if (matches == 1) {
         return {generation, SquadRouteReason::ambassador};
     }
-    route.reason = SquadRouteReason::ambassadorUnlinked;
+    // A public activity is served on public-target links only, so it has no member link to pick
+    // and its squads simply stay on the owner's link.
+    route.reason =
+        privateLinks == 0 ? SquadRouteReason::owner : SquadRouteReason::ambassadorUnlinked;
     return route;
 }
 
