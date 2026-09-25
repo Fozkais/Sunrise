@@ -895,6 +895,11 @@ struct PendingScriptableOverride final {
     bool sdkCompiled{};
     /** Estate revision this body was retained at; zero while it is only pending. */
     std::uint64_t estateSerial{};
+    /**
+     * A dialogue line held by the client until the player enters its filter volume. It plays
+     * then, not when it is sent, so a member still loading at send time can still hear it.
+     */
+    bool dialogueFiltered{};
 };
 
 /**
@@ -945,6 +950,10 @@ pending_scriptable_tail(const state::activity::SessionBinding& binding,
                                        std::uint64_t afterSerial,
                                        std::uint64_t listenerGeneration,
                                        PendingScriptableOverride& output) noexcept;
+
+/** @return True when a dialogue line delivered past afterSerial waits for a filter volume. */
+[[nodiscard]] bool dialogue_filtered_after(const state::activity::SessionBinding& binding,
+                                           std::uint64_t afterSerial) noexcept;
 
 /** @return The serial of the newest delivered dialogue line, or zero when none was delivered. */
 [[nodiscard]] std::uint64_t

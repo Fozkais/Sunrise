@@ -504,6 +504,21 @@ bool next_dialogue_pulse(const state::activity::SessionBinding& binding,
     return found;
 }
 
+/** Reports whether any line delivered past a serial waits for its filter volume. */
+bool dialogue_filtered_after(const state::activity::SessionBinding& binding,
+                             std::uint64_t afterSerial) noexcept {
+    bool filtered = false;
+    AcquireSRWLockShared(&g_lock);
+    const Instance* const instance = find_instance(binding);
+    if (instance != nullptr && instance->view.active) {
+        for (const PendingScriptableOverride& pulse : instance->dialoguePulses) {
+            filtered = filtered || (pulse.estateSerial > afterSerial && pulse.dialogueFiltered);
+        }
+    }
+    ReleaseSRWLockShared(&g_lock);
+    return filtered;
+}
+
 /** Reads the serial of the newest delivered dialogue line. */
 std::uint64_t latest_dialogue_serial(const state::activity::SessionBinding& binding) noexcept {
     AcquireSRWLockShared(&g_lock);
@@ -576,6 +591,8 @@ bool encode_dialogue_pulse(const Instance& instance,
         && auth::encode_type53_body(body, pending.body, written, bits);
     pending.bitCount = static_cast<std::uint16_t>(bits);
     pending.dialogueSequence = sequence;
+    // An unfiltered reference names no volume slot.
+    pending.dialogueFiltered = request.dialogueFilter.slotIndex >= 0;
     return encoded;
 }
 

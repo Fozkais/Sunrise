@@ -589,12 +589,17 @@ void note_client_entered(const Session& session) noexcept {
 
 /**
  * A dialogue line plays for every member present in the activity at the moment it plays, and
- * for no one else. A member still loading its region, or not yet bound, moves past the line and
- * never hears it; members already present get it on their own link at once.
+ * for no one else. An unfiltered line plays as it is sent, so a member still loading its region,
+ * or not yet bound, moves past it and never hears it; members already present get it on their own
+ * link at once. A filtered line plays only when a player enters its volume, so every member of the
+ * activity keeps it owed, and a member's client holds it until that member enters the volume too.
  * @param owner Link whose delivered roster just carried the line.
  * @param latest Serial of the newest line that delivery retained.
+ * @param filtered True when a line that delivery retained waits for its filter volume.
  */
-void drop_dialogue_for_absent_members(const Session& owner, std::uint64_t latest) noexcept {
+void drop_dialogue_for_absent_members(const Session& owner,
+                                      std::uint64_t latest,
+                                      bool filtered) noexcept {
     for (Session& member : sessions()) {
         if (&member == &owner || !member.id || !member.authenticated
             || member.activity.role == ActivityClientRole::none
@@ -605,7 +610,8 @@ void drop_dialogue_for_absent_members(const Session& owner, std::uint64_t latest
             member.activityRosterSends != 0 && member.activityPatchEpoch.seen
             && member.activityPatchEpoch.bindingGeneration == member.activity.bindingGeneration
             && client_region_ready(member, nullptr);
-        if (!present) {
+        const bool missed = !present && !filtered;
+        if (missed) {
             member.activityDialogueSerial = (std::max)(member.activityDialogueSerial, latest);
         }
         std::array<char, core::log::kLineCapacity> line{};
@@ -614,7 +620,7 @@ void drop_dialogue_for_absent_members(const Session& owner, std::uint64_t latest
                           line.size(),
                           "ev=activity stage=dialogue_broadcast result=%s serial=%llu "
                           "join=0x%016llX sends=%u epoch=%u region_ready=%u",
-                          present ? "owed" : "missed_absent",
+                          missed ? "missed_absent" : present ? "owed" : "owed_filtered",
                           static_cast<unsigned long long>(latest),
                           static_cast<unsigned long long>(member.activityMemberKey),
                           static_cast<unsigned>(member.activityRosterSends),
@@ -709,7 +715,11 @@ void commit_staged_roster(Session& session) noexcept {
         const std::uint64_t dialogueAfter =
             server::activity::host::latest_dialogue_serial(session.activity.session);
         if (dialogueAfter != dialogueBefore) {
-            drop_dialogue_for_absent_members(session, dialogueAfter);
+            drop_dialogue_for_absent_members(
+                session,
+                dialogueAfter,
+                server::activity::host::dialogue_filtered_after(session.activity.session,
+                                                                dialogueBefore));
         }
     } else if (session.activityRosterStaged.hasScriptableOverride) {
         server::activity::host::note_scriptable_attempt(
