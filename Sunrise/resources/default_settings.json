@@ -56,7 +56,9 @@
       "activity_public_membership": true,
       "prevent_ownerless_channel_close": false,
       "mission_scripting": true,
-      "single_private_ambassador": true
+      "single_private_ambassador": true,
+      "peer_region_facts": true,
+      "unfiltered_shared_dialogue": true
     }
   },
   "state": {

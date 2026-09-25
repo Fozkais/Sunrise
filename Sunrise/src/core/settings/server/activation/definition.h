@@ -34,6 +34,18 @@ struct Settings {
      * itself on every private record and claims each bubble it enters, as a solo player does.
      */
     bool singlePrivateAmbassador{true};
+    /**
+     * A fireteam member's move into a region the party has not reached yet reaches the mission
+     * program, as the owner's own moves do, so the mission advances whoever gets there first.
+     * Off, only the owner's region moves drive the program.
+     */
+    bool peerRegionFacts{true};
+    /**
+     * A dialogue line sent while several members share the activity plays at once for every
+     * member, with its authored filter volume dropped. A filtered line otherwise plays only for a
+     * member already in its volume. Off, every line keeps its filter.
+     */
+    bool unfilteredSharedDialogue{true};
 };
 
 } // namespace sunrise::core::settings::server::activation

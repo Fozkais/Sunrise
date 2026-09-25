@@ -277,6 +277,13 @@ struct RuntimeInstance final {
     std::int32_t initialStateRegion{-1};
     /** Last client-reported activity region used to select state-local incoming references. */
     std::int32_t activeRegion{-1};
+    /**
+     * One bit per region any member of the party has entered in `partyRegionsAttempt`. A peer's
+     * move reaches the program only into a region with no bit, so the party advances when anyone
+     * gets somewhere first and the program never hears the same region from a peer twice.
+     */
+    std::array<std::uint64_t, 8> partyRegions{};
+    std::uint64_t partyRegionsAttempt{};
     ProgramStatus programStatus{ProgramStatus::none};
     DeliveryStage deliveryStage{DeliveryStage::idle};
     /** The player key the bound link's message 5 binds, read at attach. */

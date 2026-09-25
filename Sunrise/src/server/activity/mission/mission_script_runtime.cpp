@@ -366,6 +366,8 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     instance.lastIntentStatus = (std::numeric_limits<std::uint16_t>::max)();
     instance.initialStateRegion = -1;
     instance.activeRegion = -1;
+    instance.partyRegions = {};
+    instance.partyRegionsAttempt = 0;
     instance.programStatus = ProgramStatus::none;
     instance.deliveryStage = DeliveryStage::idle;
     instance.publicTarget = false;

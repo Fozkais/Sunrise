@@ -43,6 +43,16 @@ bool Parser::activation_settings(server::activation::Settings& output) noexcept 
                 return false;
             }
             candidate.singlePrivateAmbassador = value;
+        } else if (key == "peer_region_facts") {
+            if (!boolean(value)) {
+                return false;
+            }
+            candidate.peerRegionFacts = value;
+        } else if (key == "unfiltered_shared_dialogue") {
+            if (!boolean(value)) {
+                return false;
+            }
+            candidate.unfilteredSharedDialogue = value;
         } else if (!skip_value(0)) {
             return false;
         }
