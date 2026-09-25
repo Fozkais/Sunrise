@@ -18,6 +18,7 @@
 #include "../../../core/logging/log.h"
 #include "../../../state/activity/mission/runtime.h"
 #include "../../../state/activity/runtime.h"
+#include "../../bap/runtime.h"
 #include "../host_runtime.h"
 #include "mission_script_region.h"
 #include "mission_script_runtime_internal.h"
@@ -107,6 +108,21 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
     }
 }
 
+/**
+ * Sense authority follows the client that simulates an object, which in a shared activity is often
+ * a peer rather than the program owner: the host's own interaction can arrive on a guest's report.
+ * A peer's Sense is taken only from a live link bound to this same activity; every edge it raises
+ * is restamped with the owner's generation, so nothing downstream sees the peer's.
+ */
+[[nodiscard]] bool peer_sense(const RuntimeInstance& instance, const host::Event& event) noexcept {
+    // Only a retained, decoded body; a peer's unsupported layout has no values to read.
+    if (!event.has_sense_observations() || event.sourceGeneration == 0) {
+        return false;
+    }
+    server::bap::ActivityLinkView link{};
+    return server::bap::activity_link_view(instance.view.binding, event.sourceGeneration, link);
+}
+
 /** True when the event may reach a callback for this instance's ActivityClient generation. */
 [[nodiscard]] bool eligible_event(const RuntimeInstance& instance,
                                   const host::Event& event) noexcept {
@@ -117,7 +133,7 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
         return true;
     }
     if (event.sourceGeneration != instance.view.activityClientGeneration) {
-        return false;
+        return peer_sense(instance, event);
     }
     return event.kind == host::EventKind::clientStateChanged
            || event.kind == host::EventKind::incidentReceived
@@ -630,7 +646,8 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
         push_cinematic(instance, event);
     }
     if (event.kind == host::EventKind::senseUpdate && sense != nullptr) {
-        if (firstAttempt) {
+        // Player life is the owner's own participation, and a peer's generation would reset it.
+        if (firstAttempt && sense->sourceGeneration == instance.view.activityClientGeneration) {
             observe_player_life(instance, *sense);
             publish_fireteam_life(now);
         }

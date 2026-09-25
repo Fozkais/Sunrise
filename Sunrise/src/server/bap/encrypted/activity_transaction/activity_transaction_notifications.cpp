@@ -1,5 +1,6 @@
 #include "activity_transaction_notifications.h"
 
+#include "../../../../core/logging/log.h"
 #include "../../../../middleware/secure_channel/runtime.h"
 #include "../../../gameplay/gameplay_advertisement.h"
 #include "../bap_connection_publication.h"
@@ -52,7 +53,8 @@ namespace {
  * @param nonce Local send nonce advanced only by complete staged notifications.
  * @param response Lock-owned complete-frame staging storage.
  * @param written Existing staged byte count, updated only by complete notifications.
- * @return True when the available snapshot was staged; a missing epoch defers only the roster.
+ * @return True when the available snapshot was staged; a missing epoch defers only the roster,
+ * and a region still allocating its host row defers membership and the roster together.
  */
 [[nodiscard]] bool stage_refresh(Session& session,
                                  Scratch& scratch,
@@ -66,24 +68,30 @@ namespace {
     const auto initialWritten = written;
     const bool initialRosterDebt = session.activityRosterOwedForEpoch;
     const bool needsMembership = session.activity.role == ActivityClientRole::privateCurrent;
+    // A mission script that declares its initial region moves the arrival after the join burst,
+    // so the refresh can name a region whose host row does not exist yet. That wait is transient:
+    // the next keepalive sees the changed arrival, allocates the row and publishes membership
+    // with the roster behind it. Refusing here instead would close the link.
+    const bool membershipHeld = needsMembership && activity.membershipMutation.hasSnapshot
+                                && advertisement_pending(session, activity);
     const bool membershipReady =
-        !needsMembership
-        || (activity.membershipMutation.hasSnapshot && !advertisement_pending(session, activity));
+        !needsMembership || (activity.membershipMutation.hasSnapshot && !membershipHeld);
     const bool hasEpoch =
         session.activityPatchEpoch.seen
         && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration;
     const push::activity::RefreshReport refresh{activity.membershipMutation.bubbleIndex,
                                                 activity.membershipMutation.requestedRevision};
     const bool complete =
-        membershipReady
+        (membershipReady || membershipHeld)
         && push::activity::append_global_state_notification(
             scratch, session.activity.session, key, nonce, response, written)
         && push::activity::append_world_globals_notification(
             scratch, session.activity.session.sessionId, key, nonce, response, written)
-        && (!needsMembership
+        && (!needsMembership || membershipHeld
             || push::activity::append_membership_notification(
                 scratch, session, activity, key, nonce, response, written))
-        && (!hasEpoch
+        // The roster binds to the player membership publishes, so it waits with membership.
+        && (!hasEpoch || membershipHeld
             || push::activity::append_roster_notification(session,
                                                           scratch,
                                                           key,
@@ -101,6 +109,12 @@ namespace {
         session.activityRosterOwedForEpoch = initialRosterDebt;
         nonce = initialNonce;
         written = initialWritten;
+    } else if (membershipHeld) {
+        // Type 52 must not answer ahead of the held membership, so no epoch debt is recorded.
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::info,
+                         "ev=activity stage=refresh result=membership_held "
+                         "reason=no_host_session");
     } else if (!hasEpoch) {
         // Joint launches can request refresh before type 52 supplies the patch epoch. Deliver
         // globals and membership now; type 52 answers the remaining roster debt on this link.

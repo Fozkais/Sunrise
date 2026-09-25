@@ -20,6 +20,14 @@ void arm_state_region_teleport(RuntimeInstance& instance,
                                const server::bap::ActivityMissionSeedPlan& plan) noexcept {
     namespace membership = ::sunrise::state::activity::membership;
     const auto& destination = instance.view.binding.destination;
+    // A public region is shared by every player in it, and its programs select a zone's state
+    // only once the client reports that region. A selection naming any other region is a
+    // restored one from an earlier visit, and a teleport the whole fireteam must synchronise
+    // then strands every member on its loading screen.
+    if (instance.publicTarget) {
+        log_line(core::log::Level::info, &instance, "state_region", "teleport_skipped_public");
+        return;
+    }
     if (destination.packageNameLength == 0
         || destination.packageNameLength > destination.packageName.size()
         || plan.effectiveRegion > static_cast<std::uint32_t>(membership::kMaximumSliceSetIndex)) {
