@@ -608,6 +608,24 @@ void drop_dialogue_for_absent_members(const Session& owner, std::uint64_t latest
         if (!present) {
             member.activityDialogueSerial = (std::max)(member.activityDialogueSerial, latest);
         }
+        std::array<char, core::log::kLineCapacity> line{};
+        const int written =
+            std::snprintf(line.data(),
+                          line.size(),
+                          "ev=activity stage=dialogue_broadcast result=%s serial=%llu "
+                          "join=0x%016llX sends=%u epoch=%u region_ready=%u",
+                          present ? "owed" : "missed_absent",
+                          static_cast<unsigned long long>(latest),
+                          static_cast<unsigned long long>(member.activityMemberKey),
+                          static_cast<unsigned>(member.activityRosterSends),
+                          member.activityPatchEpoch.seen ? 1U : 0U,
+                          client_region_ready(member, nullptr) ? 1U : 0U);
+        if (written > 0) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::info,
+                             {line.data(),
+                              (std::min)(static_cast<std::size_t>(written), line.size() - 1)});
+        }
     }
 }
 

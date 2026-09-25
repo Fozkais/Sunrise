@@ -440,13 +440,43 @@ build_roster_snapshot(Session& session,
                                                     pulse)) {
         session.activityDialogueSerialBuilt = pulse.estateSerial;
         const server::activity::host::ScriptableTarget& target = pulse.target;
+        // The same group admission the estate uses: an SDK-generated sensor lives in a
+        // state-local group this body may first have to activate or append.
+        std::string_view failure{};
+        if (target.stateLocalRoster) {
+            std::size_t position = snapshot.roster.groups.size();
+            const ExistingGroup existing =
+                layouts::valid_roster_group(pulse.stateLocalRosterGroup)
+                        && target.stateLocalRegion >= 0
+                        && target.rosterGroupIndex
+                               == server::activity::host::kGeneratedRosterGroupIndex
+                    ? find_existing_group(
+                          pulse.stateLocalRosterGroup, scratch, snapshot.roster, position)
+                    : ExistingGroup::conflict;
+            const std::uint32_t bubble =
+                static_cast<std::uint32_t>((std::max)(target.stateLocalRegion, 0))
+                / middleware::content::packages::tables::kSliceSetIndexFactor;
+            if (existing == ExistingGroup::conflict
+                || (existing == ExistingGroup::exact
+                    && !activate_existing_group(position, bubble, scratch, snapshot.roster))
+                || (existing == ExistingGroup::missing
+                    && !append_state_local_group(
+                        pulse.stateLocalRosterGroup, bubble, scratch, snapshot.roster))) {
+                failure = "state_local_group";
+            }
+        } else {
+            const CanonicalGroupStatus status =
+                canonical_group_status(layout, region, target.rosterGroupIndex);
+            if (status != CanonicalGroupStatus::active) {
+                failure = status == CanonicalGroupStatus::inactive ? "group_inactive"
+                                                                   : "group_unknown";
+            }
+        }
         message::AuthOverride value{};
-        const bool placeable =
-            !target.stateLocalRoster
-            && canonical_group_status(layout, region, target.rosterGroupIndex)
-                   == CanonicalGroupStatus::active
-            && make_auth_override(pulse, value);
-        if (placeable
+        if (failure.empty() && !make_auth_override(pulse, value)) {
+            failure = "encode";
+        }
+        if (failure.empty()
             && !install_auth_override(layout,
                                       region,
                                       scratch,
@@ -454,10 +484,30 @@ build_roster_snapshot(Session& session,
                                       value,
                                       target.rosterGroupIndex,
                                       target.rosterSlotOffset,
-                                      false)) {
-            core::log::write(core::log::Channel::server,
-                             core::log::Level::warn,
-                             "ev=activity stage=dialogue_replay result=install_refused");
+                                      target.stateLocalRoster)) {
+            failure = "install";
+        }
+        std::array<char, core::log::kLineCapacity> line{};
+        const int written = std::snprintf(
+            line.data(),
+            line.size(),
+            "ev=activity stage=dialogue_replay result=%s reason=%.*s serial=%llu cue=%u "
+            "state_local=%u group=%u slot=%u join=0x%016llX",
+            failure.empty() ? "placed" : "skipped",
+            static_cast<int>(failure.size()),
+            failure.data(),
+            static_cast<unsigned long long>(pulse.estateSerial),
+            static_cast<unsigned>(pulse.dialogueCue),
+            target.stateLocalRoster ? 1U : 0U,
+            static_cast<unsigned>(target.rosterGroupIndex),
+            static_cast<unsigned>(target.rosterSlotOffset),
+            static_cast<unsigned long long>(session.activityMemberKey));
+        if (written > 0) {
+            core::log::write(
+                core::log::Channel::server,
+                failure.empty() ? core::log::Level::info : core::log::Level::warn,
+                {line.data(),
+                 (std::min)(static_cast<std::size_t>(written), line.size() - 1)});
         }
     }
     // The pending override's group goes after the retained estate, where the next push will place
