@@ -17,3 +17,6 @@
 /out/
 /docs/
 /Sunrise/docs/
+
+# Local LAN multiplayer settings (personal IP and Steam id)
+lan-settings/
