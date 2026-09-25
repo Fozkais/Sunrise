@@ -193,6 +193,7 @@ build_roster_snapshot(Session& session,
                       std::span<const TailAuthOverride> tailOverrides) noexcept {
     snapshot = {};
     destinationLength = 0;
+    session.activityDialogueSerialBuilt = session.activityDialogueSerial;
     state::activity::defaults::ActivityDefaults defaults{};
     state::activity::defaults::snapshot(defaults);
     if (session.activity.role == ActivityClientRole::none
@@ -375,8 +376,13 @@ build_roster_snapshot(Session& session,
         }
         // A dialogue body is a pulse: the client plays one line of the cue each time it applies
         // the body, and it applies every body of every msg 5. So it goes out once, in the push
-        // that delivers it, and the slot then carries no body.
-        if (retained.kind == server::activity::host::ScriptableOverrideKind::dialogue) {
+        // that delivers it, and the slot then carries no body. That push reaches the owner only;
+        // every other fireteam link gets the line once, in its first roster past its cursor.
+        const bool dialogue =
+            retained.kind == server::activity::host::ScriptableOverrideKind::dialogue;
+        if (dialogue
+            && (retained.expectedActivityClientGeneration == session.activity.bindingGeneration
+                || retained.estateSerial <= session.activityDialogueSerial)) {
             continue;
         }
         const server::activity::host::ScriptableTarget& target = retained.target;
@@ -413,16 +419,27 @@ build_roster_snapshot(Session& session,
             }
         }
         message::AuthOverride value{};
-        if (!make_auth_override(retained, value)
-            || !install_auth_override(layout,
-                                      region,
-                                      scratch,
-                                      snapshot,
-                                      value,
-                                      target.rosterGroupIndex,
-                                      target.rosterSlotOffset,
-                                      target.stateLocalRoster)) {
+        const bool installed = make_auth_override(retained, value)
+                               && install_auth_override(layout,
+                                                        region,
+                                                        scratch,
+                                                        snapshot,
+                                                        value,
+                                                        target.rosterGroupIndex,
+                                                        target.rosterSlotOffset,
+                                                        target.stateLocalRoster);
+        // A replayed line is a courtesy to a member who missed it; losing it must never cost
+        // that member the rest of its roster.
+        if (!installed && dialogue) {
+            continue;
+        }
+        if (!installed) {
             return refuse_override("retained_auth_apply");
+        }
+        // Only a line this body really carries counts as heard.
+        if (dialogue) {
+            session.activityDialogueSerialBuilt =
+                (std::max)(session.activityDialogueSerialBuilt, retained.estateSerial);
         }
     }
     // The pending override's group goes after the retained estate, where the next push will place

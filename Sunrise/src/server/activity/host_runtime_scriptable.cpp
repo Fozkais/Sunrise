@@ -208,10 +208,13 @@ namespace detail {
     if (owned.expectedActivityClientGeneration == 0) {
         owned.expectedActivityClientGeneration = sourceGeneration;
     }
+    // The serial orders a pulse body, such as a dialogue line, against each link's cursor.
+    const std::uint64_t serial = next_nonzero(instance.scriptableEstateRevision);
+    owned.estateSerial = serial;
     for (PendingScriptableOverride& retained : instance.scriptableAuthEstate) {
         if (same_client_ref(retained.target, pending.target)) {
             retained = owned;
-            instance.scriptableEstateRevision = next_nonzero(instance.scriptableEstateRevision);
+            instance.scriptableEstateRevision = serial;
             return true;
         }
     }
@@ -220,7 +223,7 @@ namespace detail {
     } catch (const std::bad_alloc&) {
         return false;
     }
-    instance.scriptableEstateRevision = next_nonzero(instance.scriptableEstateRevision);
+    instance.scriptableEstateRevision = serial;
     return true;
 }
 

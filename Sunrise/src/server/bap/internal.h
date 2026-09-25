@@ -176,6 +176,8 @@ struct RosterPublication {
     std::uint64_t hostStateRevision{};
     /** Scriptable Auth estate revision read before this body copied the estate. */
     std::uint64_t estateRevision{};
+    /** Highest estate dialogue serial this body replays to a link that did not hear it live. */
+    std::uint64_t dialogueSerial{};
     /** SDK selected-state roster lease revision carried by this body. */
     std::uint64_t missionSeedRevision{};
     /** Type-17 lifetime state carried for that revision. */
@@ -478,6 +480,14 @@ struct Session {
     std::uint64_t activityEstateRevision{};
     /** Estate revision last tried; a roster that cannot be built retries on the keepalive only. */
     std::uint64_t activityEstateAttemptedRevision{};
+    /**
+     * Highest estate dialogue serial this link has been played. A dialogue body is a pulse the
+     * client replays on every apply, so a fireteam member's link gets each line once, in its first
+     * roster after the owner heard it, and this cursor withholds it from every later roster.
+     */
+    std::uint64_t activityDialogueSerial{};
+    /** Serial the roster being built would advance the cursor above to; staged with the body. */
+    std::uint64_t activityDialogueSerialBuilt{};
     /** The delivered roster carries the team wait bit; the arrival report is answered while set. */
     bool activityRosterAwaitClientSync{};
     /** One bounded authority-mask readback owned by this exact ActivityClient generation. */

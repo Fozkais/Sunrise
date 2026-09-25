@@ -891,6 +891,8 @@ struct PendingScriptableOverride final {
     /** Activity lifetime state for a lifetime request; ignored by every other kind. */
     std::uint8_t lifetimeState{kDefaultLifetimeState};
     bool sdkCompiled{};
+    /** Estate revision this body was retained at; zero while it is only pending. */
+    std::uint64_t estateSerial{};
 };
 
 /**

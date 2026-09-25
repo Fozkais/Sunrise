@@ -443,6 +443,7 @@ bool append_roster_notification(
         session.activityRosterStaged.priorRegionBubble = initialRegionBubble;
         session.activityRosterStaged.hostStateRevision = hostState.revision;
         session.activityRosterStaged.estateRevision = estateRevision;
+        session.activityRosterStaged.dialogueSerial = session.activityDialogueSerialBuilt;
         session.activityRosterStaged.hostLifetimeState = snapshot.lifetime;
         // A link whose body has no participation record never held the spawn, so owes no answer.
         session.activityRosterStaged.awaitClientSync =
@@ -602,6 +603,9 @@ void commit_staged_roster(Session& session) noexcept {
     // A leave delta retires every group and carries no Auth body, so it settles no estate debt.
     if (!session.activityRosterStaged.peerLeave) {
         session.activityEstateRevision = session.activityRosterStaged.estateRevision;
+        // The lines this body replayed are heard now; no later roster may carry them again.
+        session.activityDialogueSerial =
+            (std::max)(session.activityDialogueSerial, session.activityRosterStaged.dialogueSerial);
     }
     if (!session.activityRosterStaged.peerLeave) {
         const bool answeredArrival =
