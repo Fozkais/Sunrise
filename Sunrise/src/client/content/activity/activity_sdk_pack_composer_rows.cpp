@@ -631,6 +631,23 @@ translate_native_rows(const Inputs& inputs, const detail::StringResolver& linker
         }
     }
 
+    output.authoredSceneEventKeys.resize(authoredScenes.eventKeys.size());
+    for (std::size_t index = 0; index < authoredScenes.eventKeys.size(); ++index) {
+        const authored_scene_inventory::EventKey& input = authoredScenes.eventKeys[index];
+        format::AuthoredSceneEventKey& target = output.authoredSceneEventKeys[index];
+        target.sceneSlotIndex = input.slotIndex;
+        target.resourceTag = input.resourceTag;
+        target.graphTag = input.graphTag;
+        target.gateOffset = input.gateOffset;
+        target.ordinal = input.ordinal;
+        target.key = input.key;
+        target.flags = input.flags;
+        target.reserved = input.reserved;
+        if (!link_text(linker, input.id, target.id)) {
+            return false;
+        }
+    }
+
     output.authoredSceneSquadEdges.resize(authoredScenes.squadEdges.size());
     for (std::size_t index = 0; index < authoredScenes.squadEdges.size(); ++index) {
         const authored_scene_inventory::SquadEdge& input = authoredScenes.squadEdges[index];
@@ -664,8 +681,22 @@ translate_native_rows(const Inputs& inputs, const detail::StringResolver& linker
             return false;
         }
     }
-    output.dialogueCues = authoredScenes.dialogueCues;
     output.combatObjectiveGroups = authoredScenes.combatObjectiveGroups;
+    output.dialogueCues.resize(authoredScenes.dialogueCues.size());
+    for (std::size_t index = 0; index < authoredScenes.dialogueCues.size(); ++index) {
+        const authored_scene_inventory::DialogueCue& input = authoredScenes.dialogueCues[index];
+        format::DialogueCue& target = output.dialogueCues[index];
+        target.slotIndex = input.slotIndex;
+        target.cueIndex = input.cueIndex;
+        target.listTag = input.listTag;
+        target.definitionHash = input.definitionHash;
+        target.authoredWindowSeconds = input.authoredWindowSeconds;
+        target.lineCount = input.lineCount;
+        target.flags = input.flags;
+        if (!link_text(linker, input.id, target.id)) {
+            return false;
+        }
+    }
     output.dialogueCueTexts.resize(authoredScenes.dialogueCueTexts.size());
     for (std::size_t index = 0; index < authoredScenes.dialogueCueTexts.size(); ++index) {
         const authored_scene_inventory::DialogueCueText& input =
@@ -676,6 +707,10 @@ translate_native_rows(const Inputs& inputs, const detail::StringResolver& linker
         target.definitionHash = input.definitionHash;
         target.containerTag = input.containerTag;
         target.stringHash = input.stringHash;
+        target.lineIndex = input.lineIndex;
+        target.takeIndex = input.takeIndex;
+        target.audioTag = input.audioTag;
+        target.durationMs = input.durationMs;
         if (!link_text(linker, input.id, target.id)
             || !link_text(linker, input.text, target.text)) {
             return false;
@@ -694,8 +729,12 @@ translate_native_rows(const Inputs& inputs, const detail::StringResolver& linker
         target.titleStringHash = input.titleStringHash;
         target.descriptionContainerTag = input.descriptionContainerTag;
         target.descriptionStringHash = input.descriptionStringHash;
+        target.progressContainerTag = input.progressContainerTag;
+        target.progressStringHash = input.progressStringHash;
+        target.flags = input.flags;
         if (!link_text(linker, input.id, target.id) || !link_text(linker, input.title, target.title)
-            || !link_text(linker, input.description, target.description)) {
+            || !link_text(linker, input.description, target.description)
+            || !link_text(linker, input.progress, target.progress)) {
             return false;
         }
     }

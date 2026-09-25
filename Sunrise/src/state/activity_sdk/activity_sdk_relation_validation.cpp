@@ -21,6 +21,40 @@ constexpr std::uint32_t kAbilityAuthSchema = 0x80807DA1U;
 constexpr std::uint32_t kAbilityTargetSlotType = 58U;
 constexpr std::uint32_t kAbilityTargetComponentClass = 0x80807D9BU;
 
+/**
+ * @return True when every scene event key belongs to a resourced type-43 slot, names that
+ *         slot's resource, and the rows come in slot then gate order without repeats.
+ */
+[[nodiscard]] bool authored_scene_event_keys(const Catalog& catalog) noexcept {
+    const auto keys = catalog.authored_scene_event_keys();
+    const auto slots = catalog.slots();
+    for (std::size_t index = 0; index < keys.size(); ++index) {
+        const format::AuthoredSceneEventKey& row = keys[index];
+        if (row.sceneSlotIndex >= slots.size() || row.flags != format::kAuthoredSceneEventKeyExact
+            || row.reserved != 0 || row.key == 0 || row.key == format::kAbsentIndex
+            || row.graphTag == 0 || row.graphTag == format::kAbsentIndex) {
+            return false;
+        }
+        const format::Slot& slot = slots[row.sceneSlotIndex];
+        if (slot.slotType != format::kAuthoredSceneSlotType) {
+            return false;
+        }
+        const auto resources = slot_authored_scene_resources(catalog, slot);
+        if (resources.size() != 1 || resources.front().resourceTag != row.resourceTag) {
+            return false;
+        }
+        if (index != 0) {
+            const format::AuthoredSceneEventKey& previous = keys[index - 1];
+            if (previous.sceneSlotIndex > row.sceneSlotIndex
+                || (previous.sceneSlotIndex == row.sceneSlotIndex
+                    && previous.gateOffset >= row.gateOffset)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 /** @return True when every task target names slots and objectives the catalog holds. */
 [[nodiscard]] bool task_targets(const Catalog& catalog) noexcept {
     const auto targets = catalog.task_targets();
@@ -50,6 +84,46 @@ constexpr std::uint32_t kAbilityTargetComponentClass = 0x80807D9BU;
         }
         previousTask = row.taskSlotIndex;
         first = false;
+    }
+    return true;
+}
+
+/**
+ * @return True when every type-53 slot with cue rows has exactly one row per cue, in
+ *         slot then cue order, and lines only on cues whose content tree was matched.
+ */
+[[nodiscard]] bool dialogue_cues(const Catalog& catalog) noexcept {
+    const auto cues = catalog.dialogue_cues();
+    const auto slots = catalog.slots();
+    for (std::size_t index = 0; index < cues.size(); ++index) {
+        const format::DialogueCue& row = cues[index];
+        if (row.slotIndex >= slots.size() || (row.flags & ~format::kDialogueCueFlagMask) != 0
+            || row.reserved != 0 || row.definitionHash == 0 || row.definitionHash == 0x811C9DC5U
+            || !std::isfinite(row.authoredWindowSeconds) || row.authoredWindowSeconds < 0.0F
+            || row.listTag == 0 || row.listTag == format::kAbsentIndex
+            || (row.lineCount != 0 && (row.flags & format::kDialogueCueLinesExact) == 0)) {
+            return false;
+        }
+        const format::Slot& slot = slots[row.slotIndex];
+        if (slot.slotType != format::kDialogueSlotType
+            || (slot.flags & format::kSlotDialogueCuesExact) == 0
+            || row.cueIndex >= slot.reserved) {
+            return false;
+        }
+        // The rows of one slot start at cue zero and step by one up to the slot's cue count.
+        const bool opensSlot = index == 0 || cues[index - 1].slotIndex != row.slotIndex;
+        if (opensSlot) {
+            if (row.cueIndex != 0 || (index != 0 && cues[index - 1].slotIndex > row.slotIndex)) {
+                return false;
+            }
+        } else if (row.cueIndex != cues[index - 1].cueIndex + 1) {
+            return false;
+        }
+        const bool closesSlot =
+            index + 1 == cues.size() || cues[index + 1].slotIndex != row.slotIndex;
+        if (closesSlot && row.cueIndex + 1 != slot.reserved) {
+            return false;
+        }
     }
     return true;
 }
@@ -105,35 +179,32 @@ constexpr std::uint32_t kAbilityTargetComponentClass = 0x80807D9BU;
         }
         priorGroup = &row;
     }
-    const format::DialogueCue* previous = nullptr;
-    for (const format::DialogueCue& row : catalog.dialogue_cues()) {
-        if (row.slotIndex >= slots.size() || row.cueIndex >= slots[row.slotIndex].reserved
-            || slots[row.slotIndex].slotType != format::kDialogueSlotType
-            || (slots[row.slotIndex].flags & format::kSlotDialogueCuesExact) == 0
-            || row.definitionHash == 0 || row.definitionHash == kAbsentDefinitionHash
-            || !std::isfinite(row.authoredWindowSeconds) || row.authoredWindowSeconds < 0.0F
-            || (previous != nullptr
-                && (row.slotIndex < previous->slotIndex
-                    || (row.slotIndex == previous->slotIndex
-                        && row.cueIndex <= previous->cueIndex)))) {
+    for (const format::DialogueCueText& row : catalog.dialogue_cue_texts()) {
+        if (row.slotIndex >= slots.size() || row.containerTag == 0 || row.stringHash == 0
+            || row.takeIndex >= format::kDialogueTakeCount) {
             return false;
         }
-        previous = &row;
-    }
-    for (const format::DialogueCueText& row : catalog.dialogue_cue_texts()) {
-        if (row.slotIndex >= slots.size() || row.cueIndex >= slots[row.slotIndex].reserved
-            || slots[row.slotIndex].slotType != format::kDialogueSlotType || row.definitionHash == 0
-            || row.definitionHash == kAbsentDefinitionHash || row.containerTag == 0
-            || row.stringHash == 0) {
+        const auto cues = slot_dialogue_cues(catalog, slots[row.slotIndex]);
+        if (row.cueIndex >= cues.size()) {
+            return false;
+        }
+        const format::DialogueCue& cue = cues[row.cueIndex];
+        if (cue.definitionHash != row.definitionHash || row.lineIndex >= cue.lineCount) {
             return false;
         }
     }
     for (const format::DirectiveElement& row : catalog.directive_elements()) {
-        if (row.slotIndex >= slots.size() || slots[row.slotIndex].slotType != 68U
-            || row.elementIndex < 0
+        // An authored field has both source tags; an absent one has neither.
+        const bool descriptionPaired =
+            (row.descriptionContainerTag == 0) == (row.descriptionStringHash == 0);
+        const bool progressPaired =
+            (row.progressContainerTag == 0) == (row.progressStringHash == 0);
+        if (row.slotIndex >= slots.size()
+            || slots[row.slotIndex].slotType != format::kDirectiveSlotType || row.elementIndex < 0
             || static_cast<std::uint32_t>(row.elementIndex) >= row.elementCount
-            || row.titleContainerTag == 0 || row.titleStringHash == 0
-            || row.descriptionContainerTag == 0 || row.descriptionStringHash == 0) {
+            || row.titleContainerTag == 0 || row.titleStringHash == 0 || !descriptionPaired
+            || !progressPaired
+            || (row.descriptionContainerTag == 0 && row.progressContainerTag == 0)) {
             return false;
         }
     }
@@ -582,13 +653,16 @@ bool relations(const Catalog& catalog) {
         bool (*run)(const Catalog&) noexcept;
     };
     // Every relation check a catalog must pass, named so a refusal reports which one failed.
-    static constexpr std::array<Check, 7> kChecks{{{"task_targets", &task_targets},
-                                                   {"authored_text", &authored_text},
-                                                   {"behavior_edges", &behavior_edges},
-                                                   {"actor_semantics", &actor_semantics},
-                                                   {"runtime_semantics", &runtime_semantics},
-                                                   {"sobject_semantics", &sobject_semantics},
-                                                   {"entity_types", &entity_types}}};
+    static constexpr std::array<Check, 9> kChecks{
+        {{"authored_scene_event_keys", &authored_scene_event_keys},
+         {"task_targets", &task_targets},
+         {"dialogue_cues", &dialogue_cues},
+         {"authored_text", &authored_text},
+         {"behavior_edges", &behavior_edges},
+         {"actor_semantics", &actor_semantics},
+         {"runtime_semantics", &runtime_semantics},
+         {"sobject_semantics", &sobject_semantics},
+         {"entity_types", &entity_types}}};
     for (const Check& check : kChecks) {
         if (!check.run(catalog)) {
             remember(check.name);

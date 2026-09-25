@@ -49,6 +49,8 @@ bool render_contract_files(const Source& source, Bundle& output) noexcept {
                  {"actor_sequence_tables", number(source.actorSequenceTables.size())},
                  {"actor_sequence_entries", number(source.actorSequenceEntries.size())},
                  {"actor_sequence_bindings", number(source.actorSequenceBindings.size())},
+                 {"authored_scene_event_keys", number(source.authoredSceneEventKeys.size())},
+                 {"dialogue_cues", number(source.dialogueCues.size())},
              })},
         });
         if (!render_json(manifest, 0, output.manifestJson)) {
@@ -100,6 +102,8 @@ local EventKind = {
     SQUAD_PROVOKED = 38,
     DEVICE_STATE = 39,
     REGION_CHANGED = 40,
+    DIALOGUE_STAGED = 41,
+    DIALOGUE_FINISHED = 42,
 }
 
 ---@class SunriseEvent
@@ -173,6 +177,18 @@ local EventKind = {
 ---@field applied_request fun(self: SunriseDeviceStateEvent, )lua"
             R"lua(args: {channel: any}): SunriseRequestKey|nil
 
+---@class SunriseDialogueCueEvent: SunriseEvent
+---@field dialogue_registry_key integer
+---@field dialogue_slot_type integer
+---@field dialogue_slot_index integer
+---@field cue integer
+---@field duration_ms integer
+
+---@class SunriseDialogueFinishedEvent: SunriseDialogueCueEvent
+---@field timer_name string
+---@field timer_deadline_tick string
+---@field timer_sequence string
+
 ---@class SunriseProgram
 ---@field on_start? fun(context: any, state: SunriseState)
 ---@field on_load? fun(context: any, state: SunriseState)
@@ -225,6 +241,10 @@ local EventKind = {
 ---@field on_event_damage_state? SunriseEventHandler
 ---@field on_event_cinematic_skip_requested? fun(context: any, state: SunriseState, )lua"
             R"lua(event: SunriseCinematicEvent)
+---@field on_event_dialogue_staged? fun(context: any, state: SunriseState, )lua"
+            R"lua(event: SunriseDialogueCueEvent)
+---@field on_event_dialogue_finished? fun(context: any, state: SunriseState, )lua"
+            R"lua(event: SunriseDialogueFinishedEvent)
 
 ---@class SunriseVector3
 ---@field x number
@@ -245,6 +265,7 @@ local EventKind = {
 ---@field auth_component_offset integer|nil
 ---@field auth_dynamic boolean|nil
 ---@field auth_writable boolean|nil
+---@field unresourced boolean|nil
 ---@field set_object_active fun(SunriseSlot, SunriseObjectArguments?): SunriseRequestKey
 ---@field applied fun(self: SunriseSlot, args: {channel: any}): boolean
 ---@field run_atoms fun(self: SunriseSlot, )lua"
@@ -271,6 +292,13 @@ local EventKind = {
 ---@field watch_damage fun(self: SunriseSlot, args: {target: SunriseSlot}): SunriseRequestKey
 ---@field set_occupancy_condition fun(self: SunriseSlot, )lua"
             R"lua(args: {value: integer, filter: SunriseSlot?}): SunriseRequestKey
+---@field generate_map fun(self: SunriseSlot, args: {record: integer?, seed: integer?, )lua"
+            R"lua(mode: integer?, enabled: boolean?, anchors: table[]?, values: integer[]?, )lua"
+            R"lua(reals: number[]?, state_key: integer?}): SunriseRequestKey
+---@field set_mission_effect fun(self: SunriseSlot, args: {filter: SunriseSlot?, )lua"
+            R"lua(enabled: boolean?, revision: integer?}): SunriseRequestKey
+---@field set_toggle fun(self: SunriseSlot, args: {state: integer?, )lua"
+            R"lua(target: SunriseSlot?}): SunriseRequestKey
 ---@field set_object_filter fun(self: SunriseSlot, args: {players: boolean?, )lua"
             R"lua(target: SunriseSlot?, inside: SunriseSlot?, )lua"
             R"lua(inside_any: SunriseSlot[]?}): SunriseRequestKey
@@ -310,9 +338,20 @@ local EventKind = {
 ---@field transition any Generated device transition value.
 ---@field snap? boolean Jump to the end value instead of moving.
 
+---@class SunriseDirective
+---@field id string
+---@field slot_row integer
+---@field name_hash integer
+---@field element integer
+---@field title string
+---@field description string Empty when the element was authored without one.
+---@field progress string|nil Label shown before the counter, when authored.
+---@field counter boolean|nil True when the HUD shows the lane's progress values.
+
 ---@class SunriseDirectiveArguments
----@field directive table Generated mission directive declaration.
+---@field directive SunriseDirective Generated mission directive declaration.
 ---@field state? integer Defaults to 0, the native enter state.
+---@field progress? integer[] One to four lane values, current then maximum first; the element must declare a counter.
 ---@field audience? SunriseSlot Authored type-70 engagement sensor for the mission banner.
 ---@field navpoint? SunriseSlot Authored type-47 navigation marker.
 ---@field waypoint? SunriseSlot Authored type-60 volume; inside it the HUD marker hides.
@@ -356,6 +395,7 @@ local EventKind = {
 ---@field activate fun(self: SunriseScene, args: {spawn: boolean?}?): SunriseRequestKey
 ---@field stop fun(self: SunriseScene, args: table?): SunriseRequestKey
 ---@field send_event fun(self: SunriseScene, args: {key: integer}): SunriseRequestKey
+---@field event_keys integer[]|nil
 
 ---@class SunriseTaskTarget
 ---@field id string
@@ -404,6 +444,7 @@ local EventKind = {
 ---@field TaskGroup table<string, table<string, SunriseCombatTaskGroup>>
 ---@field ActorAbility table<string, table<string, table<string, SunriseActorAbility>>>
 ---@field TriggerVolume table<string, SunriseTriggerVolume>
+---@field Directive table<string, SunriseDirective>
 
 ---@class SunriseActivity
 ---@field client_teleport_reset integer

@@ -389,6 +389,7 @@ void draw_dialogues(const sdk::BoundView& view, const mission::Snapshot& snapsho
                                     display_text(catalog, object.id).data(),
                                     static_cast<unsigned>(occurrenceRow),
                                     static_cast<unsigned>(slot.slotIndex));
+                const auto cueRows = sdk::slot_dialogue_cues(catalog, slot);
                 for (std::uint32_t cueRow = 0; cueRow < slot.reserved; ++cueRow) {
                     // The cue index is a 16-bit wire field, so the row is narrowed once here.
                     const auto cue = static_cast<std::uint16_t>(cueRow);
@@ -406,16 +407,16 @@ void draw_dialogues(const sdk::BoundView& view, const mission::Snapshot& snapsho
                     }
                     ImGui::EndDisabled();
                     ImGui::SameLine();
-                    std::uint32_t definitionHash = 0;
-                    for (const sdk::format::DialogueCueText& row : catalog.dialogue_cue_texts()) {
-                        if (row.slotIndex == slotRow && row.cueIndex == cue) {
-                            definitionHash = row.definitionHash;
-                            break;
-                        }
+                    if (cueRow < cueRows.size()) {
+                        const sdk::format::DialogueCue& definition = cueRows[cueRow];
+                        ImGui::Text("Cue %u  definition %08X  %.3f s  %u lines",
+                                    static_cast<unsigned>(cue),
+                                    static_cast<unsigned>(definition.definitionHash),
+                                    static_cast<double>(definition.authoredWindowSeconds),
+                                    static_cast<unsigned>(definition.lineCount));
+                    } else {
+                        ImGui::Text("Cue %u  no definition", static_cast<unsigned>(cue));
                     }
-                    ImGui::Text("Cue %u  definition %08X",
-                                static_cast<unsigned>(cue),
-                                static_cast<unsigned>(definitionHash));
                     ImGui::Indent();
                     bool hasCandidate = false;
                     const auto dialogueRows = catalog.dialogue_cue_texts();
@@ -493,9 +494,11 @@ void draw_directives(const sdk::BoundView& view, const mission::Snapshot& snapsh
             }
             const std::string_view title = display_text(catalog, directive.title);
             const std::string_view description = display_text(catalog, directive.description);
+            const std::string_view progress = display_text(catalog, directive.progress);
             const std::string_view id = display_text(catalog, directive.id);
             if (!query.empty() && !contains_folded(title, query)
-                && !contains_folded(description, query) && !contains_folded(id, query)) {
+                && !contains_folded(description, query) && !contains_folded(progress, query)
+                && !contains_folded(id, query)) {
                 continue;
             }
             ++rows;
@@ -510,7 +513,17 @@ void draw_directives(const sdk::BoundView& view, const mission::Snapshot& snapsh
             ImGui::PushID(static_cast<int>(directive.nameHash));
             ImGui::PushID(directive.elementIndex);
             ImGui::Text("%.*s", print_length(title), title.data());
-            ImGui::TextWrapped("%.*s", print_length(description), description.data());
+            if (!description.empty()) {
+                ImGui::TextWrapped("%.*s", print_length(description), description.data());
+            }
+            if (!progress.empty()) {
+                ImGui::TextWrapped("%.*s%s",
+                                   print_length(progress),
+                                   progress.data(),
+                                   (directive.flags & sdk::format::kDirectiveElementCounter) != 0
+                                       ? " (counter)"
+                                       : "");
+            }
             ImGui::TextDisabled("hash %08X  element %d  slot %u",
                                 static_cast<unsigned>(directive.nameHash),
                                 directive.elementIndex,

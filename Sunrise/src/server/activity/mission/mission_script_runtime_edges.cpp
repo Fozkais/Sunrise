@@ -151,6 +151,7 @@ sense_value(std::span<const sense_values::DecodedValue> body,
     spare->registryKey = key.registryKey;
     spare->objectTag = key.objectTag;
     spare->slotIndex = key.slotIndex;
+    spare->counters = {};
     return spare;
 }
 
@@ -707,7 +708,8 @@ void push_objective_edges(RuntimeInstance& instance,
         if (watched == nullptr) {
             continue;
         }
-        const bool first = !watched->used;
+        // The client sends the sensor only when a counter changes, so its first report may
+        // already carry the first kill: it is read as a rise from zero, not as a baseline.
         watched->used = true;
         for (std::uint8_t block = 0; block < counters.blocks; ++block) {
             for (std::size_t task = 0; task < kObjectiveTaskCapacity; ++task) {
@@ -717,7 +719,23 @@ void push_objective_edges(RuntimeInstance& instance,
                 const std::uint8_t value = counters.value[block][task];
                 const std::uint8_t previous = watched->counters[block][task];
                 watched->counters[block][task] = value;
-                if (first || value <= previous) {
+                std::array<char, 96> details{};
+                const int written = std::snprintf(details.data(),
+                                                  details.size(),
+                                                  "slot=%u block=%u task=%zu count=%u previous=%u",
+                                                  static_cast<unsigned>(observation.key.slotIndex),
+                                                  static_cast<unsigned>(block),
+                                                  task,
+                                                  static_cast<unsigned>(value),
+                                                  static_cast<unsigned>(previous));
+                if (written > 0 && static_cast<std::size_t>(written) < details.size()) {
+                    log_line(core::log::Level::debug,
+                             &instance,
+                             "objective",
+                             value > previous ? "rose" : "held",
+                             {details.data(), static_cast<std::size_t>(written)});
+                }
+                if (value <= previous) {
                     continue;
                 }
                 host::Event event = sense_edge_event(instance, observation);

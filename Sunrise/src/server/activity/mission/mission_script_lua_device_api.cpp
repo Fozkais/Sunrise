@@ -10,6 +10,8 @@
 #include "../../../middleware/bap/activity_message/darkness_zone_auth.h"
 #include "../../../middleware/bap/activity_message/ghost_link_auth.h"
 #include "../../../middleware/bap/activity_message/interactable_object_auth.h"
+#include "../../../middleware/bap/activity_message/mission_effect_auth.h"
+#include "../../../middleware/bap/activity_message/toggle_auth.h"
 #include "../../../middleware/encoding/bit_writer.h"
 #include "mission_script_lua_internal.h"
 
@@ -259,6 +261,88 @@ constexpr std::int8_t kFilterModeInside = 1;
         return luaL_error(state, "object filter encoder failed");
     }
     return queue_slot_auth(state, slot, auth::kType34Schema, bits, std::span(bytes).first(written));
+}
+
+/**
+ * Attaches an authored hop-on effect to the entities a type-34 filter selects:
+ * `slot:set_mission_effect{filter = <type-34 slot>, enabled = true, revision = 1}`. A new
+ * revision re-attaches the effect; `enabled = false` removes it and takes no filter.
+ */
+[[nodiscard]] int slot_set_mission_effect(lua_State* state) {
+    namespace effect = middleware::bap::activity_message::mission_effect;
+    const auto* const handle =
+        static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
+    // Only these named arguments belong to this API.
+    static constexpr std::array<std::string_view, 3> kDeclared{"filter", "enabled", "revision"};
+    refuse_unknown_arguments(state, kDeclared);
+    SlotDefinition slot{};
+    if (!current_slot(state, *handle, slot) || slot.slotType != effect::kSlotType
+        || slot.componentClass != effect::kComponentClass || slot.authSchema != effect::kSchema) {
+        return luaL_error(state, "mission effect requires an authored type-26 hop-on");
+    }
+    const bool enabled = optional_boolean_argument(state, "enabled", true);
+    scriptable_auth::Type2LaneClientRef filter{};
+    if (enabled) {
+        lua_getfield(state, 2, "filter");
+        const bool present = !lua_isnil(state, -1);
+        lua_pop(state, 1);
+        if (!present
+            || !optional_slot_reference(
+                state, "filter", scriptable_auth::kType34SlotType, filter)) {
+            return luaL_error(state, "mission effect requires an authored type-34 filter");
+        }
+    }
+    const lua_Integer revision = optional_integer_argument(state, "revision", 1);
+    if (!valid_counter(revision)) {
+        return luaL_error(state, "mission effect revision must be positive");
+    }
+    std::array<std::byte, effect::kBytes> body{};
+    std::size_t written = 0;
+    if (!effect::encode(filter, enabled, static_cast<std::int32_t>(revision), body, written)) {
+        return luaL_error(state, "mission effect encoder failed");
+    }
+    return queue_slot_auth(state, slot, effect::kSchema, effect::kBits, body);
+}
+
+/**
+ * Sets an authored toggle sensor: `slot:set_toggle{state = 1, target = <slot>}`. The state is
+ * -1..2 and the target, any live slot of the mission, may be left out; both go out as given.
+ */
+[[nodiscard]] int slot_set_toggle(lua_State* state) {
+    namespace toggle = middleware::bap::activity_message::toggle_auth;
+    const auto* const handle =
+        static_cast<const SlotHandle*>(luaL_checkudata(state, 1, kSlotMetatable));
+    // Only these named arguments belong to this API.
+    static constexpr std::array<std::string_view, 2> kDeclared{"state", "target"};
+    refuse_unknown_arguments(state, kDeclared);
+    SlotDefinition sensor{};
+    if (!current_slot(state, *handle, sensor) || sensor.slotType != toggle::kSlotType
+        || sensor.componentClass != toggle::kComponentClass
+        || sensor.authSchema != toggle::kSchema) {
+        return luaL_error(state, "toggle requires an authored type-32 sensor");
+    }
+    const lua_Integer value = optional_integer_argument(state, "state", 1);
+    if (value < toggle::kMinimumState || value > toggle::kMaximumState) {
+        return luaL_error(state, "toggle state must be -1..2");
+    }
+    toggle::Request request{};
+    request.state = static_cast<std::int32_t>(value);
+    SlotHandle target{};
+    if (optional_argument(state, "target", kSlotMetatable, target)) {
+        SlotDefinition definition{};
+        if (!current_slot(state, target, definition) || definition.registryKey == 0
+            || definition.slotIndex > auth_fields::kMaximumClientRefIndex) {
+            return luaL_error(state, "toggle target is not a live slot");
+        }
+        request.targetRegistryKey = definition.registryKey;
+        request.targetSlotType = definition.slotType;
+        request.targetSlotIndex = static_cast<std::uint16_t>(definition.slotIndex);
+    }
+    std::array<std::byte, toggle::kByteCount> body{};
+    if (!toggle::encode(request, body)) {
+        return luaL_error(state, "toggle encoder failed");
+    }
+    return queue_slot_auth(state, sensor, toggle::kSchema, toggle::kBitCount, body);
 }
 
 /** Binds an authored damage monitor to one exact object; a new revision re-binds it. */

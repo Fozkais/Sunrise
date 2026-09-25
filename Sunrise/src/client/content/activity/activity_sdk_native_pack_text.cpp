@@ -1,7 +1,9 @@
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <map>
@@ -9,11 +11,15 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "../../../core/logging/log.h"
 #include "../../../middleware/content/packages/tables/activity_display_name_reader.h"
+#include "../../../state/activity_sdk/runtime.h"
 #include "activity_sdk_dialogue_group_index.h"
+#include "activity_sdk_dialogue_list.h"
 #include "activity_sdk_native_pack_internal.h"
 
 namespace sunrise::client::content::activity::sdk_generation::native_pack_pipeline {
@@ -51,6 +57,38 @@ add_relative(std::size_t member, std::int64_t relative, std::size_t& target) noe
     }
     target = member - static_cast<std::size_t>(distance);
     return true;
+}
+
+/** Logs one packed directive element the generator leaves out, and why. */
+void log_directive_element(std::uint32_t slotIndex,
+                           std::uint32_t nameHash,
+                           std::size_t element,
+                           std::uint32_t flags,
+                           const char* result) noexcept {
+    std::array<char, 160> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=activity_sdk_directive_element result=%s slot_row=%u "
+                                      "name=0x%08X element=%zu flags=0x%08X",
+                                      result,
+                                      static_cast<unsigned>(slotIndex),
+                                      static_cast<unsigned>(nameHash),
+                                      element,
+                                      static_cast<unsigned>(flags));
+    if (written > 0) {
+        core::log::write(
+            core::log::Channel::client,
+            core::log::Level::debug,
+            {line.data(), (std::min)(static_cast<std::size_t>(written), line.size() - 1U)});
+    }
+}
+
+/** Reads one packed localized string reference: container tag, then string hash. */
+[[nodiscard]] bool read_reference(std::span<const std::byte> bytes,
+                                  std::size_t offset,
+                                  display::Reference& output) noexcept {
+    return read_value(bytes, offset, output.containerTag)
+           && read_value(bytes, offset + 4U, output.stringHash);
 }
 
 /** Reads one array field's data offset and count, checking its declared class and stride. */
@@ -102,17 +140,51 @@ struct AuthoredTextCandidate final {
     std::uint32_t slotIndex{};
     std::uint32_t cueIndex{format::kAbsentIndex};
     std::uint32_t definitionHash{};
+    std::uint32_t lineIndex{};
+    std::uint32_t takeIndex{};
+    std::uint32_t audioTag{};
+    std::uint32_t durationMs{};
 };
 
-/** The two localized fields are one directive element, not two selectable directives. */
+/** The localized fields are one directive element, not several selectable directives. */
 struct AuthoredDirectiveCandidate final {
     display::Reference title{};
     display::Reference description{};
+    display::Reference progress{};
+    std::uint32_t flags{};
     std::uint32_t slotIndex{};
     std::uint32_t nameHash{};
     std::int32_t elementIndex{-1};
     std::uint32_t elementCount{};
 };
+
+/** Logs one dialogue list fact that changes which cues carry lines, with its context. */
+void log_dialogue_list(const squads::DescriptorFact& descriptor,
+                       std::uint32_t listTag,
+                       const char* result,
+                       std::uint32_t definitionHash,
+                       std::uint32_t count,
+                       core::log::Level level) noexcept {
+    std::array<char, 192> line{};
+    const int written =
+        std::snprintf(line.data(),
+                      line.size(),
+                      "ev=activity_sdk_dialogue_list result=%s config=0x%08X offset=0x%X "
+                      "slot_row=%u list=0x%08X definition=0x%08X count=%u",
+                      result,
+                      static_cast<unsigned>(descriptor.configTag),
+                      static_cast<unsigned>(descriptor.descriptorOffset),
+                      static_cast<unsigned>(descriptor.slotIndex),
+                      static_cast<unsigned>(listTag),
+                      static_cast<unsigned>(definitionHash),
+                      static_cast<unsigned>(count));
+    if (written > 0) {
+        core::log::write(
+            core::log::Channel::client,
+            level,
+            {line.data(), (std::min)(static_cast<std::size_t>(written), line.size() - 1U)});
+    }
+}
 
 } // namespace
 
@@ -198,8 +270,9 @@ bool attach_combat_objective_groups(const topology_inventory::Snapshot& topology
     }
 }
 
-/** Extracts localized dialogue aliases and safe authored directive elements. */
+/** Extracts dialogue cues, their localized lines, and safe authored directive elements. */
 bool attach_authored_text(const topology_inventory::Snapshot& topology,
+                          const topology_enrichment::Snapshot& enrichment,
                           const squads::Facts& facts,
                           PackageContext& packageContext,
                           authored_scene::Snapshot& output) {
@@ -221,9 +294,25 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
         result = &cache.emplace(tag, std::move(row)).first->second;
         return true;
     };
+    // An absent reference has no container; a present one must name a string container.
+    auto string_container = [&](const display::Reference& reference) -> bool {
+        if (reference.containerTag == 0) {
+            return true;
+        }
+        const CachedTag* container = nullptr;
+        return package(reference.containerTag, container) && container != nullptr
+               && container->classId == display::kStringContainerClass;
+    };
     try {
+        if (enrichment.slots.size() != topology.slots.size()) {
+            return false;
+        }
         std::vector<AuthoredTextCandidate> dialogueCandidates{};
         std::vector<AuthoredDirectiveCandidate> directiveCandidates{};
+        // The list each type-53 slot's cues were taken from; a second descriptor of the slot that
+        // references another list makes the slot's cues unknowable, so the slot keeps none.
+        std::unordered_map<std::uint32_t, std::uint32_t> dialogueListBySlot{};
+        std::unordered_set<std::uint32_t> conflictingDialogueSlots{};
         for (const squads::DescriptorFact& descriptor : facts.descriptors) {
             if (descriptor.slotIndex >= topology.slots.size()) {
                 continue;
@@ -249,103 +338,198 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
                 if (resource->classId != format::kDialogueAuthoredListClass) {
                     continue;
                 }
-                std::size_t groups = 0;
-                std::size_t groupCount = 0;
-                if (!read_array(
-                        bytes, 0x18U, 16U, format::kDialogueGroupArrayClass, groups, groupCount)) {
+                const auto [known, firstList] =
+                    dialogueListBySlot.emplace(descriptor.slotIndex, resourceTag);
+                if (!firstList) {
+                    if (known->second != resourceTag) {
+                        conflictingDialogueSlots.insert(descriptor.slotIndex);
+                        log_dialogue_list(descriptor,
+                                          resourceTag,
+                                          "list_conflict",
+                                          known->second,
+                                          0,
+                                          core::log::Level::warn);
+                    }
                     continue;
                 }
-                std::size_t definitions = 0;
-                std::size_t definitionCount = 0;
-                if (!read_array(bytes,
-                                8U,
-                                8U,
-                                format::kDialogueDefinitionArrayClass,
-                                definitions,
-                                definitionCount)) {
+                dialogue_list::Snapshot list{};
+                if (!dialogue_list::read(bytes, list)) {
+                    log_dialogue_list(
+                        descriptor, resourceTag, "malformed", 0, 0, core::log::Level::warn);
                     continue;
                 }
-                std::vector<dialogue_groups::Span> groupIndex{};
-                if (!dialogue_groups::build(bytes, groups, groupCount, groupIndex)) {
+                for (const dialogue_list::SharedHash& shared : list.sharedHashes) {
+                    log_dialogue_list(descriptor,
+                                      resourceTag,
+                                      "shared_hash",
+                                      shared.definitionHash,
+                                      shared.treeCount,
+                                      core::log::Level::info);
+                }
+                // An empty list authors no cue, so its slot never gets an exact cue count.
+                if (list.cues.empty()) {
                     continue;
                 }
-                for (std::size_t cue = 0; cue < definitionCount; ++cue) {
-                    std::uint32_t definitionHash = 0;
-                    if (!read_value(bytes, definitions + cue * 8U, definitionHash)
-                        || definitionHash == 0 || definitionHash == 0x811C9DC5U) {
+                // Cue rows follow the slot's cue count, which the same list gave.
+                const topology_enrichment::Slot& enriched = enrichment.slots[descriptor.slotIndex];
+                if ((enriched.flags & format::kSlotDialogueCuesExact) == 0
+                    || enriched.dialogueCueCount != list.cues.size()) {
+                    log_dialogue_list(descriptor,
+                                      resourceTag,
+                                      "count_mismatch",
+                                      0,
+                                      static_cast<std::uint32_t>(list.cues.size()),
+                                      core::log::Level::warn);
+                    continue;
+                }
+                for (std::size_t cue = 0; cue < list.cues.size(); ++cue) {
+                    const dialogue_list::Cue& row = list.cues[cue];
+                    authored_scene::DialogueCue cueRow{};
+                    char cueId[64]{};
+                    const int cueIdLength = std::snprintf(cueId,
+                                                          sizeof cueId,
+                                                          "dialogue_cue/%08x/%u",
+                                                          descriptor.slotIndex,
+                                                          static_cast<unsigned>(cue));
+                    if (cueIdLength <= 0 || static_cast<std::size_t>(cueIdLength) >= sizeof cueId
+                        || !copy_text(
+                            std::string_view(cueId, static_cast<std::size_t>(cueIdLength)),
+                            cueRow.id)) {
+                        return false;
+                    }
+                    cueRow.slotIndex = descriptor.slotIndex;
+                    cueRow.cueIndex = static_cast<std::uint32_t>(cue);
+                    cueRow.listTag = resourceTag;
+                    cueRow.definitionHash = row.definitionHash;
+                    cueRow.authoredWindowSeconds = row.seconds;
+                    if (row.status == dialogue_list::CueStatus::resolved) {
+                        cueRow.lineCount = row.lineCount;
+                        cueRow.flags = format::kDialogueCueLinesExact;
+                    }
+                    output.dialogueCues.push_back(cueRow);
+                    if (row.status == dialogue_list::CueStatus::ambiguous
+                        || row.status == dialogue_list::CueStatus::missing
+                        || row.status == dialogue_list::CueStatus::malformed) {
+                        log_dialogue_list(
+                            descriptor,
+                            resourceTag,
+                            row.status == dialogue_list::CueStatus::ambiguous ? "cue_ambiguous"
+                            : row.status == dialogue_list::CueStatus::missing ? "cue_missing"
+                                                                              : "cue_malformed",
+                            row.definitionHash,
+                            static_cast<std::uint32_t>(cue),
+                            core::log::Level::warn);
                         continue;
                     }
-                    dialogue_groups::Span group{};
-                    if (!dialogue_groups::find(groupIndex, definitionHash, group)) {
-                        continue;
-                    }
-                    for (std::size_t offset = group.begin; offset + 8U <= group.end; offset += 4U) {
-                        std::uint32_t containerTag = 0;
-                        std::uint32_t stringHash = 0;
-                        const CachedTag* container = nullptr;
-                        if (!read_value(bytes, offset, containerTag)
-                            || !read_value(bytes, offset + 4U, stringHash)
-                            || containerTag < 0x80A12000U || containerTag >= 0xC0000000U
-                            || !package(containerTag, container) || container == nullptr
-                            || container->classId != display::kStringContainerClass) {
-                            continue;
+                    // Both takes of a line normally reference the same text; each is still its
+                    // own row, and the Lua publisher folds equal texts.
+                    for (std::uint32_t lineIndex = 0; lineIndex < row.lineCount; ++lineIndex) {
+                        const dialogue_list::Line& line = list.lines[row.firstLine + lineIndex];
+                        const std::array<const dialogue_list::Take*, format::kDialogueTakeCount>
+                            takes{&line.first, &line.second};
+                        for (std::uint32_t takeIndex = 0; takeIndex < takes.size(); ++takeIndex) {
+                            const dialogue_list::Take& take = *takes[takeIndex];
+                            const CachedTag* container = nullptr;
+                            if (take.containerTag == 0 || take.containerTag == format::kAbsentIndex
+                                || !package(take.containerTag, container) || container == nullptr
+                                || container->classId != display::kStringContainerClass) {
+                                continue;
+                            }
+                            dialogueCandidates.push_back(
+                                {{take.containerTag, take.stringHash},
+                                 descriptor.slotIndex,
+                                 static_cast<std::uint32_t>(cue),
+                                 row.definitionHash,
+                                 lineIndex,
+                                 takeIndex,
+                                 take.audioTag,
+                                 state::activity_sdk::authored_milliseconds(take.seconds)});
                         }
-                        dialogueCandidates.push_back({{containerTag, stringHash},
-                                                      descriptor.slotIndex,
-                                                      static_cast<std::uint32_t>(cue),
-                                                      definitionHash});
                     }
                 }
             } else {
-                if (resource->classId != 0x80804F72U) {
+                if (resource->classId != format::kDirectiveTableClass) {
                     continue;
                 }
                 std::size_t entries = 0;
                 std::size_t entryCount = 0;
-                if (!read_array(bytes, 8U, 40U, 0x80804F74U, entries, entryCount)) {
+                if (!read_array(bytes,
+                                format::kDirectiveEntryArrayOffset,
+                                format::kDirectiveEntrySize,
+                                format::kDirectiveEntryClass,
+                                entries,
+                                entryCount)) {
                     continue;
                 }
                 for (std::size_t entry = 0; entry < entryCount; ++entry) {
-                    const std::size_t row = entries + entry * 40U;
+                    const std::size_t row = entries + entry * format::kDirectiveEntrySize;
+                    const std::size_t elementsField = row + format::kDirectiveEntryElementsOffset;
                     std::uint32_t nameHash = 0;
                     std::int64_t relative = 0;
                     std::size_t elements = 0;
                     std::uint64_t elementCount = 0;
                     std::uint32_t elementClass = 0;
-                    if (!read_value(bytes, row, nameHash) || !read_value(bytes, row + 24U, relative)
-                        || !add_relative(row + 24U, relative, elements)
+                    if (!read_value(bytes, row, nameHash)
+                        || !read_value(bytes, elementsField, relative)
+                        || !add_relative(elementsField, relative, elements)
                         || !read_value(bytes, elements, elementCount) || elementCount == 0
                         || elementCount > format::kAbsentIndex
                         || !read_value(bytes, elements + 8U, elementClass)
-                        || elementClass != 0x80804F76U) {
+                        || elementClass != format::kDirectiveElementClass) {
                         continue;
                     }
                     const std::size_t data = elements + 16U;
-                    if (data > bytes.size() || elementCount > (bytes.size() - data) / 36U) {
+                    if (data > bytes.size()
+                        || elementCount
+                               > (bytes.size() - data) / format::kDirectiveElementPackedSize) {
                         continue;
                     }
                     for (std::size_t element = 0; element < elementCount; ++element) {
-                        const std::size_t elementRow = data + element * 36U;
+                        const std::size_t elementRow =
+                            data + element * format::kDirectiveElementPackedSize;
                         AuthoredDirectiveCandidate candidate{};
                         candidate.slotIndex = descriptor.slotIndex;
                         candidate.nameHash = nameHash;
                         candidate.elementIndex = static_cast<std::int32_t>(element);
                         candidate.elementCount = static_cast<std::uint32_t>(elementCount);
-                        if (!read_value(bytes, elementRow, candidate.title.containerTag)
-                            || !read_value(bytes, elementRow + 4U, candidate.title.stringHash)
-                            || !read_value(
-                                bytes, elementRow + 8U, candidate.description.containerTag)
-                            || !read_value(
-                                bytes, elementRow + 12U, candidate.description.stringHash)) {
+                        if (!read_reference(bytes,
+                                            elementRow + format::kDirectiveElementTitleOffset,
+                                            candidate.title)
+                            || !read_reference(bytes,
+                                               elementRow
+                                                   + format::kDirectiveElementDescriptionOffset,
+                                               candidate.description)
+                            || !read_reference(bytes,
+                                               elementRow + format::kDirectiveElementProgressOffset,
+                                               candidate.progress)
+                            || !read_value(bytes,
+                                           elementRow + format::kDirectiveElementFlagsOffset,
+                                           candidate.flags)) {
+                            log_directive_element(
+                                descriptor.slotIndex, nameHash, element, candidate.flags, "read");
                             continue;
                         }
-                        const CachedTag* title = nullptr;
-                        const CachedTag* description = nullptr;
-                        if (!package(candidate.title.containerTag, title) || title == nullptr
-                            || title->classId != display::kStringContainerClass
-                            || !package(candidate.description.containerTag, description)
-                            || description == nullptr
-                            || description->classId != display::kStringContainerClass) {
+                        // The title is always authored; the other two may be absent.
+                        if (candidate.title.containerTag == 0
+                            || !string_container(candidate.title)) {
+                            log_directive_element(
+                                descriptor.slotIndex, nameHash, element, candidate.flags, "title");
+                            continue;
+                        }
+                        if (!string_container(candidate.description)) {
+                            log_directive_element(descriptor.slotIndex,
+                                                  nameHash,
+                                                  element,
+                                                  candidate.flags,
+                                                  "description");
+                            continue;
+                        }
+                        if (!string_container(candidate.progress)) {
+                            log_directive_element(descriptor.slotIndex,
+                                                  nameHash,
+                                                  element,
+                                                  candidate.flags,
+                                                  "progress");
                             continue;
                         }
                         directiveCandidates.push_back(candidate);
@@ -354,14 +538,27 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
             }
         }
         std::vector<display::Reference> references{};
-        references.reserve(dialogueCandidates.size() + directiveCandidates.size() * 2U);
+        references.reserve(dialogueCandidates.size() + directiveCandidates.size() * 3U);
         for (const AuthoredTextCandidate& row : dialogueCandidates) {
             references.push_back(row.reference);
         }
         for (const AuthoredDirectiveCandidate& row : directiveCandidates) {
             references.push_back(row.title);
             references.push_back(row.description);
+            references.push_back(row.progress);
         }
+        const auto conflicting = [&](const auto& row) {
+            return conflictingDialogueSlots.contains(row.slotIndex);
+        };
+        output.dialogueCues.erase(
+            std::remove_if(output.dialogueCues.begin(), output.dialogueCues.end(), conflicting),
+            output.dialogueCues.end());
+        std::sort(output.dialogueCues.begin(),
+                  output.dialogueCues.end(),
+                  [](const auto& first, const auto& second) {
+                      return std::tie(first.slotIndex, first.cueIndex)
+                             < std::tie(second.slotIndex, second.cueIndex);
+                  });
         if (references.empty()) {
             return true;
         }
@@ -375,16 +572,19 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
             if (name.authoredEmpty || name.length == 0) {
                 continue;
             }
+            const AuthoredTextCandidate& candidate = dialogueCandidates[index];
+            if (conflictingDialogueSlots.contains(candidate.slotIndex)) {
+                continue;
+            }
             const std::string_view text(name.value.data(), name.length);
             char id[96]{};
-            const AuthoredTextCandidate& candidate = dialogueCandidates[index];
             const int length = std::snprintf(id,
                                              sizeof id,
-                                             "dialogue/%08x/%u/%08x/%08x",
+                                             "dialogue/%08x/%u/%u/%u",
                                              candidate.slotIndex,
                                              candidate.cueIndex,
-                                             candidate.definitionHash,
-                                             candidate.reference.stringHash);
+                                             candidate.lineIndex,
+                                             candidate.takeIndex);
             authored_scene::DialogueCueText row{};
             if (length <= 0 || static_cast<std::size_t>(length) >= sizeof id
                 || !copy_text(std::string_view(id, static_cast<std::size_t>(length)), row.id)
@@ -396,14 +596,26 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
             row.definitionHash = candidate.definitionHash;
             row.containerTag = candidate.reference.containerTag;
             row.stringHash = candidate.reference.stringHash;
+            row.lineIndex = candidate.lineIndex;
+            row.takeIndex = candidate.takeIndex;
+            row.audioTag = candidate.audioTag;
+            row.durationMs = candidate.durationMs;
             output.dialogueCueTexts.push_back(row);
         }
         std::size_t resolved = dialogueCandidates.size();
         for (const AuthoredDirectiveCandidate& candidate : directiveCandidates) {
             const display::Name& title = names.names[resolved++];
             const display::Name& description = names.names[resolved++];
-            if (title.authoredEmpty || title.length == 0 || description.authoredEmpty
-                || description.length == 0) {
+            const display::Name& progress = names.names[resolved++];
+            const bool hasDescription = !description.authoredEmpty && description.length != 0;
+            const bool hasProgress = !progress.authoredEmpty && progress.length != 0;
+            if (title.authoredEmpty || title.length == 0 || (!hasDescription && !hasProgress)) {
+                log_directive_element(candidate.slotIndex,
+                                      candidate.nameHash,
+                                      static_cast<std::size_t>(candidate.elementIndex),
+                                      candidate.flags,
+                                      title.authoredEmpty || title.length == 0 ? "no_title"
+                                                                               : "no_text");
                 continue;
             }
             char id[96]{};
@@ -417,8 +629,12 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
             if (length <= 0 || static_cast<std::size_t>(length) >= sizeof id
                 || !copy_text(std::string_view(id, static_cast<std::size_t>(length)), row.id)
                 || !copy_text(std::string_view(title.value.data(), title.length), row.title)
-                || !copy_text(std::string_view(description.value.data(), description.length),
-                              row.description)) {
+                || (hasDescription
+                    && !copy_text(std::string_view(description.value.data(), description.length),
+                                  row.description))
+                || (hasProgress
+                    && !copy_text(std::string_view(progress.value.data(), progress.length),
+                                  row.progress))) {
                 continue;
             }
             row.slotIndex = candidate.slotIndex;
@@ -427,14 +643,23 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
             row.elementCount = candidate.elementCount;
             row.titleContainerTag = candidate.title.containerTag;
             row.titleStringHash = candidate.title.stringHash;
-            row.descriptionContainerTag = candidate.description.containerTag;
-            row.descriptionStringHash = candidate.description.stringHash;
+            // An absent field keeps zero tags, so the row says which fields were authored.
+            if (hasDescription) {
+                row.descriptionContainerTag = candidate.description.containerTag;
+                row.descriptionStringHash = candidate.description.stringHash;
+            }
+            if (hasProgress) {
+                row.progressContainerTag = candidate.progress.containerTag;
+                row.progressStringHash = candidate.progress.stringHash;
+            }
+            row.flags = candidate.flags;
             output.directiveElements.push_back(row);
         }
+        // Lines keep their play order inside a cue.
         auto dialogueLess = [](const auto& first, const auto& second) {
-            return std::tie(first.slotIndex, first.cueIndex, first.definitionHash, first.stringHash)
+            return std::tie(first.slotIndex, first.cueIndex, first.lineIndex, first.takeIndex)
                    < std::tie(
-                       second.slotIndex, second.cueIndex, second.definitionHash, second.stringHash);
+                       second.slotIndex, second.cueIndex, second.lineIndex, second.takeIndex);
         };
         auto directiveLess = [](const auto& first, const auto& second) {
             return std::tie(first.slotIndex, first.nameHash, first.elementIndex)
@@ -466,8 +691,7 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
 bool attach_dialogue_cue_counts(const topology_inventory::Snapshot& topology,
                                 const squads::Facts& facts,
                                 PackageContext& packageContext,
-                                topology_enrichment::Snapshot& enrichment,
-                                authored_scene::Snapshot& authoredRows) {
+                                topology_enrichment::Snapshot& enrichment) {
     if (topology.slots.size() != enrichment.slots.size()) {
         return false;
     }
@@ -549,17 +773,34 @@ bool attach_dialogue_cue_counts(const topology_inventory::Snapshot& topology,
             if (resolved && sawDescriptor && agreedCount != 0) {
                 enriched.dialogueCueCount = static_cast<std::uint32_t>(agreedCount);
                 enriched.flags |= format::kSlotDialogueCuesExact;
-                for (std::uint32_t cue = 0; cue < agreedDefinitions.size(); ++cue) {
-                    const auto& definition = agreedDefinitions[cue];
-                    authoredRows.dialogueCues.push_back(
-                        {slotRow, cue, definition.hash, definition.authoredWindowSeconds});
-                }
             }
         }
         return true;
     } catch (...) {
         return false;
     }
+}
+
+/** Flags the slot rows of the scenes the inventory found without a resource. */
+bool attach_unresourced_scenes(const topology_inventory::Snapshot& topology,
+                               const authored_scene::Snapshot& scenes,
+                               topology_enrichment::Snapshot& enrichment) noexcept {
+    if (enrichment.slots.size() != topology.slots.size()) {
+        return false;
+    }
+    for (const std::uint32_t slotRow : scenes.unresourcedSlots) {
+        if (slotRow >= topology.slots.size()
+            || topology.slots[slotRow].slotType != format::kAuthoredSceneSlotType) {
+            return false;
+        }
+        topology_enrichment::Slot& enriched = enrichment.slots[slotRow];
+        if (enriched.componentClass != format::kAuthoredSceneComponentClass
+            || (enriched.flags & format::kSlotSchemaJoinExact) == 0) {
+            return false;
+        }
+        enriched.flags |= format::kSlotAuthoredSceneUnresourced;
+    }
+    return true;
 }
 
 } // namespace sunrise::client::content::activity::sdk_generation::native_pack_pipeline

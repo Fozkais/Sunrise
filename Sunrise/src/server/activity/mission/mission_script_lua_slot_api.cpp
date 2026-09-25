@@ -165,6 +165,10 @@ namespace auth_catalog = middleware::bap::activity_message::auth_schema_catalog;
         lua_pushinteger(state, definition.flags);
     } else if (key == "set_object_filter") {
         lua_pushcfunction(state, &slot_set_object_filter);
+    } else if (key == "set_mission_effect") {
+        lua_pushcfunction(state, &slot_set_mission_effect);
+    } else if (key == "set_toggle") {
+        lua_pushcfunction(state, &slot_set_toggle);
     } else if (key == "watch_damage") {
         lua_pushcfunction(state, &slot_watch_damage);
     } else if (key == "set_object_active") {
@@ -175,6 +179,8 @@ namespace auth_catalog = middleware::bap::activity_message::auth_schema_catalog;
         lua_pushcfunction(state, &slot_transition);
     } else if (key == "set_occupancy_condition") {
         lua_pushcfunction(state, &slot_set_occupancy_condition);
+    } else if (key == "generate_map") {
+        lua_pushcfunction(state, &slot_generate_map);
     } else if (key == "set_directive") {
         lua_pushcfunction(state, &slot_set_directive);
     } else if (key == "clear_directives") {

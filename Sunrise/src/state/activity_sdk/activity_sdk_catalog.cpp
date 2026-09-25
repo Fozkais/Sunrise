@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
+#include <limits>
 
 #include "internal.h"
 #include "runtime.h"
@@ -180,12 +182,12 @@ std::span<const format::TaskTarget> Catalog::task_targets() const noexcept {
     return rows<format::TaskTarget>(header_, view_, format::SectionIndex::taskTargets);
 }
 
-std::span<const format::DialogueCueText> Catalog::dialogue_cue_texts() const noexcept {
-    return rows<format::DialogueCueText>(header_, view_, format::SectionIndex::dialogueCueTexts);
-}
-
 std::span<const format::DialogueCue> Catalog::dialogue_cues() const noexcept {
     return rows<format::DialogueCue>(header_, view_, format::SectionIndex::dialogueCues);
+}
+
+std::span<const format::DialogueCueText> Catalog::dialogue_cue_texts() const noexcept {
+    return rows<format::DialogueCueText>(header_, view_, format::SectionIndex::dialogueCueTexts);
 }
 
 std::span<const format::ActorAbility> Catalog::actor_abilities() const noexcept {
@@ -306,6 +308,10 @@ std::span<const format::ActorSequenceEntry> Catalog::actor_sequence_entries() co
 std::span<const format::ActorSequenceBinding> Catalog::actor_sequence_bindings() const noexcept {
     return rows<format::ActorSequenceBinding>(
         header_, view_, format::SectionIndex::actorSequenceBindings);
+}
+std::span<const format::AuthoredSceneEventKey> Catalog::authored_scene_event_keys() const noexcept {
+    return rows<format::AuthoredSceneEventKey>(
+        header_, view_, format::SectionIndex::authoredSceneEventKeys);
 }
 
 std::span<const format::ActorStateName> Catalog::actor_state_names() const noexcept {
@@ -768,6 +774,37 @@ std::span<const format::SquadAnchor> squad_anchors(const Catalog& catalog,
     return children(catalog.squads(), squad, catalog.squad_anchors(), squad.anchors);
 }
 
+/** Relies on slot then cue ordering to return one contiguous zero-copy cue range. */
+std::span<const format::DialogueCue> slot_dialogue_cues(const Catalog& catalog,
+                                                        const format::Slot& slot) noexcept {
+    const auto slots = catalog.slots();
+    if (!owns(slots, slot)) {
+        return {};
+    }
+    const auto values = catalog.dialogue_cues();
+    const std::uint32_t slotIndex = static_cast<std::uint32_t>(&slot - slots.data());
+    const auto first =
+        std::lower_bound(values.begin(), values.end(), slotIndex, [](const auto& row, auto index) {
+            return row.slotIndex < index;
+        });
+    const auto last =
+        std::upper_bound(first, values.end(), slotIndex, [](auto index, const auto& row) {
+            return index < row.slotIndex;
+        });
+    return values.subspan(static_cast<std::size_t>(first - values.begin()),
+                          static_cast<std::size_t>(last - first));
+}
+
+std::uint32_t authored_milliseconds(float seconds) noexcept {
+    const double value = std::round(static_cast<double>(seconds) * 1000.0);
+    if (!(value > 0.0)) {
+        return 0;
+    }
+    return value >= static_cast<double>((std::numeric_limits<std::uint32_t>::max)())
+               ? (std::numeric_limits<std::uint32_t>::max)()
+               : static_cast<std::uint32_t>(value);
+}
+
 /** Relies on slot-index ordering to return one contiguous zero-copy resource range. */
 std::span<const format::AuthoredSceneResource>
 slot_authored_scene_resources(const Catalog& catalog, const format::Slot& slot) noexcept {
@@ -784,6 +821,27 @@ slot_authored_scene_resources(const Catalog& catalog, const format::Slot& slot) 
     const auto last =
         std::upper_bound(first, values.end(), slotIndex, [](auto index, const auto& row) {
             return index < row.slotIndex;
+        });
+    return values.subspan(static_cast<std::size_t>(first - values.begin()),
+                          static_cast<std::size_t>(last - first));
+}
+
+/** Relies on scene-slot ordering to return one contiguous zero-copy key range. */
+std::span<const format::AuthoredSceneEventKey>
+slot_authored_scene_event_keys(const Catalog& catalog, const format::Slot& slot) noexcept {
+    const auto slots = catalog.slots();
+    if (!owns(slots, slot)) {
+        return {};
+    }
+    const auto values = catalog.authored_scene_event_keys();
+    const std::uint32_t slotIndex = static_cast<std::uint32_t>(&slot - slots.data());
+    const auto first =
+        std::lower_bound(values.begin(), values.end(), slotIndex, [](const auto& row, auto index) {
+            return row.sceneSlotIndex < index;
+        });
+    const auto last =
+        std::upper_bound(first, values.end(), slotIndex, [](auto index, const auto& row) {
+            return index < row.sceneSlotIndex;
         });
     return values.subspan(static_cast<std::size_t>(first - values.begin()),
                           static_cast<std::size_t>(last - first));
