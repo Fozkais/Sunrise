@@ -1,11 +1,15 @@
 /** Scriptable Auth overrides: target eligibility and the entry points a mission script calls. */
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <mutex>
 #include <shared_mutex>
 #include <span>
 
+#include "../../core/logging/log.h"
+#include "../../core/settings/settings.h"
 #include "../../state/build_data/runtime.h"
 #include "../activity/host_runtime.h"
 #include "internal.h"
@@ -17,6 +21,21 @@ namespace {
 namespace layouts = state::build_data::scenarios;
 namespace roster_message = middleware::bap::activity_message::sensor_auth_update;
 namespace tables = middleware::content::packages::tables;
+
+/** @return Authenticated private links bound to this activity, one per member playing it. */
+[[nodiscard]] std::size_t
+private_member_links_locked(const state::activity::SessionBinding& binding) noexcept {
+    std::size_t count = 0;
+    for (const Session& session : sessions()) {
+        if (session.id != 0 && session.authenticated
+            && session.activity.role == ActivityClientRole::privateCurrent
+            && session.activity.bindingGeneration != 0
+            && state::activity::same_binding(session.activity.session, binding)) {
+            ++count;
+        }
+    }
+    return count;
+}
 
 /** @return True when a generated group owns the exact requested type-23 Auth slot. */
 [[nodiscard]] bool valid_state_local_type23_target(const activity::host::ScriptableTarget& target,
@@ -507,6 +526,29 @@ bool request_activity_state_local_dialogue_override(
     const activity::host::ScriptableOutputReservation* reservation,
     middleware::bap::activity_message::scriptable_auth::Type2LaneClientRef filter) noexcept {
     const std::lock_guard lock(session_lock());
+    // A filtered line waits on each client until its own player enters the volume, and a member
+    // who reaches it late never hears it. With several members the line plays for everyone at
+    // once instead, since whoever set it off has moved the whole party on.
+    if (filter.slotIndex >= 0
+        && core::settings::get().server.activation.unfilteredSharedDialogue) {
+        const std::size_t members = private_member_links_locked(binding);
+        if (members > 1) {
+            std::array<char, core::log::kLineCapacity> line{};
+            const int written = std::snprintf(line.data(),
+                                              line.size(),
+                                              "ev=activity stage=dialogue_filter result=dropped "
+                                              "cue=%u members=%zu filter_key=0x%08X",
+                                              static_cast<unsigned>(cueIndex),
+                                              members,
+                                              static_cast<unsigned>(filter.registryKey));
+            if (written > 0) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::info,
+                                 {line.data(), static_cast<std::size_t>(written)});
+            }
+            filter = {};
+        }
+    }
     std::size_t linkCount = 0;
     const Session* const session =
         activity_link_for_generation_locked(binding, expectedGeneration, linkCount);
