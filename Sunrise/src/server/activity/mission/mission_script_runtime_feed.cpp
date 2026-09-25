@@ -111,14 +111,20 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
 }
 
 /**
+ * Accepts the world facts a fireteam member reports into the owner's program.
  * Sense authority follows the client that simulates an object, which in a shared activity is often
  * a peer rather than the program owner: the host's own interaction can arrive on a guest's report.
- * A peer's Sense is taken only from a live link bound to this same activity; every edge it raises
- * is restamped with the owner's generation, so nothing downstream sees the peer's.
+ * A player-trigger crossing advances the mission whichever member made it. Both are taken only
+ * from a live link bound to this same activity, and every edge they raise is restamped with the
+ * owner's generation, so nothing downstream sees the peer's. Region, spawn and client-state
+ * reports stay the owner's: they describe one client's placement, not the shared world.
  */
-[[nodiscard]] bool peer_sense(const RuntimeInstance& instance, const host::Event& event) noexcept {
+[[nodiscard]] bool peer_input(const RuntimeInstance& instance, const host::Event& event) noexcept {
     // Only a retained, decoded body; a peer's unsupported layout has no values to read.
-    if (!event.has_sense_observations() || event.sourceGeneration == 0) {
+    const bool sense = event.has_sense_observations();
+    const bool crossing =
+        event.kind == host::EventKind::incidentReceived && event.hasPlayerTrigger;
+    if ((!sense && !crossing) || event.sourceGeneration == 0) {
         return false;
     }
     server::bap::ActivityLinkView link{};
@@ -136,7 +142,7 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
         return true;
     }
     if (event.sourceGeneration != instance.view.activityClientGeneration) {
-        return peer_sense(instance, event);
+        return peer_input(instance, event);
     }
     return event.kind == host::EventKind::clientStateChanged
            || event.kind == host::EventKind::incidentReceived

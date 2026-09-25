@@ -12,6 +12,7 @@
 #include "../../../../middleware/bap/activity_message/sense_update.h"
 #include "../../../../state/activity/member_context.h"
 #include "../../../../state/activity_sdk/runtime.h"
+#include "../../activity_link_selection.h"
 #include "../../internal.h"
 #include "activity_message_route_internal.h"
 
@@ -22,6 +23,34 @@ namespace sense_update = middleware::bap::activity_message::sense_update;
 namespace cinematic_incident = middleware::bap::activity_message::cinematic_incident;
 namespace player_trigger_incident = middleware::bap::activity_message::player_trigger_incident;
 namespace activity_sdk = state::activity_sdk;
+
+/**
+ * Resolves the private link a public bubble's crossing belongs to.
+ * One private link plays the bubble when the player is alone. A fireteam gives every member a
+ * link on the same private activity, so the crossing goes to the reporting player's own link.
+ * @pre The caller holds the BAP session lock.
+ */
+[[nodiscard]] const Session* private_source_link(const ActivityClientBinding& binding) noexcept {
+    std::size_t links = 0;
+    const Session* const unique = unique_activity_link_locked(binding.source, links);
+    if (unique != nullptr) {
+        return unique->activity.role == ActivityClientRole::privateCurrent ? unique : nullptr;
+    }
+    std::size_t reporters = 0;
+    const Session* const reporter =
+        activity_link_for_generation_locked(binding.session, binding.bindingGeneration, reporters);
+    if (reporter == nullptr || reporter->accountHandle == state::kInvalidAccount) {
+        return nullptr;
+    }
+    for (const Session& session : sessions()) {
+        if (session.id && session.authenticated && session.accountHandle == reporter->accountHandle
+            && session.activity.role == ActivityClientRole::privateCurrent
+            && state::activity::same_binding(session.activity.session, binding.source)) {
+            return &session;
+        }
+    }
+    return nullptr;
+}
 
 /** Borrowed exact connection and SDK state used only during one msg-6 route call. */
 struct SenseResolverContext final {
@@ -238,10 +267,7 @@ bool frame_only(const ActivityClientBinding& binding,
             // triggers were armed by the private activity that plays the bubble. The incident
             // is delivered to that private link, whose script owns the trigger.
             if (input.hasPlayerTrigger && binding.role == ActivityClientRole::publicTarget) {
-                std::size_t links = 0;
-                const Session* const source = unique_activity_link_locked(binding.source, links);
-                if (source != nullptr
-                    && source->activity.role == ActivityClientRole::privateCurrent) {
+                if (const Session* const source = private_source_link(binding)) {
                     input.binding = binding.source;
                     input.sourceGeneration = source->activity.bindingGeneration;
                 }

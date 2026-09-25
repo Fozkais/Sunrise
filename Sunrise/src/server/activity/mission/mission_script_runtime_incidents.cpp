@@ -54,6 +54,9 @@ void push_player_trigger(RuntimeInstance& instance, const host::Event& incident)
                          : std::string_view{});
     host::Event event = incident;
     event.kind = host::EventKind::playerTrigger;
+    // A fireteam member's crossing reaches the owner's program; like every derived edge, it
+    // carries the owner's generation from here on.
+    event.sourceGeneration = instance.view.activityClientGeneration;
     event.firstRegistryKey = source.registryKey;
     event.slotObjectTag = source.objectTag;
     event.firstSlotIndex = source.slotIndex;
