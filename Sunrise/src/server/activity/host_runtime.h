@@ -946,6 +946,10 @@ pending_scriptable_tail(const state::activity::SessionBinding& binding,
                                        std::uint64_t listenerGeneration,
                                        PendingScriptableOverride& output) noexcept;
 
+/** @return The serial of the newest delivered dialogue line, or zero when none was delivered. */
+[[nodiscard]] std::uint64_t
+latest_dialogue_serial(const state::activity::SessionBinding& binding) noexcept;
+
 /** @return The binding's estate revision, zero before anything was delivered or when absent. */
 [[nodiscard]] std::uint64_t
 scriptable_estate_revision(const state::activity::SessionBinding& binding) noexcept;

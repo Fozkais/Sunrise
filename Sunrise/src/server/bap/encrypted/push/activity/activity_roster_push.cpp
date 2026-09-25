@@ -587,6 +587,30 @@ void note_client_entered(const Session& session) noexcept {
     }
 }
 
+/**
+ * A dialogue line plays for every member present in the activity at the moment it plays, and
+ * for no one else. A member still loading its region, or not yet bound, moves past the line and
+ * never hears it; members already present get it on their own link at once.
+ * @param owner Link whose delivered roster just carried the line.
+ * @param latest Serial of the newest line that delivery retained.
+ */
+void drop_dialogue_for_absent_members(const Session& owner, std::uint64_t latest) noexcept {
+    for (Session& member : sessions()) {
+        if (&member == &owner || !member.id || !member.authenticated
+            || member.activity.role == ActivityClientRole::none
+            || !state::activity::same_binding(member.activity.session, owner.activity.session)) {
+            continue;
+        }
+        const bool present =
+            member.activityRosterSends != 0 && member.activityPatchEpoch.seen
+            && member.activityPatchEpoch.bindingGeneration == member.activity.bindingGeneration
+            && client_region_ready(member, nullptr);
+        if (!present) {
+            member.activityDialogueSerial = (std::max)(member.activityDialogueSerial, latest);
+        }
+    }
+}
+
 } // namespace
 
 /** Settles a staged roster body that reached the caller. */
@@ -658,10 +682,17 @@ void commit_staged_roster(Session& session) noexcept {
         scriptableCommitReady = activate_staged_squad_override(session);
     }
     if (scriptableCommitReady) {
+        const std::uint64_t dialogueBefore =
+            server::activity::host::latest_dialogue_serial(session.activity.session);
         server::activity::host::note_scriptable_transport_staged(
             session.activity.session,
             session.activity.bindingGeneration,
             session.activityRosterStaged.scriptableOverride);
+        const std::uint64_t dialogueAfter =
+            server::activity::host::latest_dialogue_serial(session.activity.session);
+        if (dialogueAfter != dialogueBefore) {
+            drop_dialogue_for_absent_members(session, dialogueAfter);
+        }
     } else if (session.activityRosterStaged.hasScriptableOverride) {
         server::activity::host::note_scriptable_attempt(
             session.activity.session,

@@ -428,11 +428,11 @@ build_roster_snapshot(Session& session,
             return refuse_override("retained_auth_apply");
         }
     }
-    // The owning link hears each line in the push that delivers it. Every other fireteam link
-    // replays the dialogue log: one line per body, the oldest it has not heard, because one msg 5
-    // holds one body per sensor. Its cursor moves only with a delivered body, and the keepalive
-    // keeps pushing while lines remain. A line this region cannot place is passed over, so it can
-    // neither stall the log nor cost the member the rest of its roster.
+    // A line plays for every member present when it plays. The owning link hears it in the push
+    // that delivers it; every other present member gets it on its own link straight after, one
+    // line per body because one msg 5 holds one body per sensor, in the order they played. A
+    // member absent at that moment was moved past the line and never gets it. A line this region
+    // cannot place is passed over, so it can neither stall the next ones nor refuse the roster.
     server::activity::host::PendingScriptableOverride pulse{};
     if (server::activity::host::next_dialogue_pulse(session.activity.session,
                                                     session.activityDialogueSerial,

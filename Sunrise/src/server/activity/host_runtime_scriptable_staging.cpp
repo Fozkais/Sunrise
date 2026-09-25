@@ -504,6 +504,18 @@ bool next_dialogue_pulse(const state::activity::SessionBinding& binding,
     return found;
 }
 
+/** Reads the serial of the newest delivered dialogue line. */
+std::uint64_t latest_dialogue_serial(const state::activity::SessionBinding& binding) noexcept {
+    AcquireSRWLockShared(&g_lock);
+    const Instance* const instance = find_instance(binding);
+    const std::uint64_t serial =
+        instance != nullptr && instance->view.active && !instance->dialoguePulses.empty()
+            ? instance->dialoguePulses.back().estateSerial
+            : 0;
+    ReleaseSRWLockShared(&g_lock);
+    return serial;
+}
+
 /** Reads the revision every roster built from the estate above carries. */
 std::uint64_t scriptable_estate_revision(const state::activity::SessionBinding& binding) noexcept {
     AcquireSRWLockShared(&g_lock);

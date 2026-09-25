@@ -481,9 +481,9 @@ struct Session {
     /** Estate revision last tried; a roster that cannot be built retries on the keepalive only. */
     std::uint64_t activityEstateAttemptedRevision{};
     /**
-     * Highest estate dialogue serial this link has been played. A dialogue body is a pulse the
-     * client replays on every apply, so a fireteam member's link gets each line once, in its first
-     * roster after the owner heard it, and this cursor withholds it from every later roster.
+     * Highest dialogue serial this link is settled for: sent to it, or played while it was absent.
+     * A dialogue body is a pulse the client replays on every apply, so each line goes to a present
+     * member exactly once and this withholds it from every later roster.
      */
     std::uint64_t activityDialogueSerial{};
     /** Serial the roster being built would advance the cursor above to; staged with the body. */

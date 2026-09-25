@@ -200,9 +200,9 @@ struct Instance final {
      */
     std::uint64_t scriptableEstateRevision{};
     /**
-     * Every delivered dialogue line in delivery order, oldest first. The estate keeps only the
-     * latest body per sensor, but each line is its own pulse, and every fireteam member has to
-     * hear each one, so members replay this log through their own cursor.
+     * Delivered dialogue lines in the order they played, oldest first. The estate keeps only the
+     * latest body per sensor, but each line is its own pulse that every member present when it
+     * played must receive, so each member's link sends the ones it is still owed from here.
      */
     std::vector<PendingScriptableOverride> dialoguePulses{};
     PendingScriptableOverride pendingScriptable{};

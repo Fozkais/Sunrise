@@ -71,7 +71,7 @@ void reset_join_state(Session& session) noexcept {
     session.activityHostStateRevision = 0;
     session.activityEstateRevision = 0;
     session.activityEstateAttemptedRevision = 0;
-    // A line spoken before this link bound is history, not something it missed.
+    // A line that played before this link bound played without it.
     session.activityDialogueSerial =
         server::activity::host::scriptable_estate_revision(session.activity.session);
     session.activityDialogueSerialBuilt = session.activityDialogueSerial;
