@@ -923,6 +923,10 @@ pending_scriptable_tail(const state::activity::SessionBinding& binding,
                                           std::uint64_t activityClientGeneration,
                                           std::vector<PendingScriptableOverride>& output) noexcept;
 
+/** @return The binding's estate revision, zero before anything was delivered or when absent. */
+[[nodiscard]] std::uint64_t
+scriptable_estate_revision(const state::activity::SessionBinding& binding) noexcept;
+
 /** Queues a native objective decision after both SDK slot identities are validated. */
 [[nodiscard]] bool
 request_squad_objective(const state::activity::SessionBinding& binding,

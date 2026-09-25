@@ -115,6 +115,10 @@ bool append_roster_notification(
     if (written > response.size() || left) {
         return false;
     }
+    // Read before the body copies the estate: a change landing mid-build only makes the link
+    // look stale once more, never current while it is not.
+    const std::uint64_t estateRevision =
+        server::activity::host::scriptable_estate_revision(session.activity.session);
     const auto initialLeases = session.activityRosterGroupLeases;
     const bool initialRosterOwedForEpoch = session.activityRosterOwedForEpoch;
     const std::uint8_t initialRosterSends = session.activityRosterSends;
@@ -373,6 +377,10 @@ bool append_roster_notification(
         session.activityRosterState = initialRosterState;
         session.activityRosterRegionEpoch = initialRegionEpoch;
         session.activityRosterRegionBubble = initialRegionBubble;
+        // The client already holds this exact body, estate included, so nothing is owed.
+        if (!peerLeave) {
+            session.activityEstateRevision = estateRevision;
+        }
         report_roster_push(
             session, snapshot, name, 0, kNoGrant, RosterOutcome::unchanged, bodyHash, forced);
         return false;
@@ -434,6 +442,7 @@ bool append_roster_notification(
         session.activityRosterStaged.priorRegionEpoch = initialRegionEpoch;
         session.activityRosterStaged.priorRegionBubble = initialRegionBubble;
         session.activityRosterStaged.hostStateRevision = hostState.revision;
+        session.activityRosterStaged.estateRevision = estateRevision;
         session.activityRosterStaged.hostLifetimeState = snapshot.lifetime;
         // A link whose body has no participation record never held the spawn, so owes no answer.
         session.activityRosterStaged.awaitClientSync =
@@ -590,6 +599,10 @@ void commit_staged_roster(Session& session) noexcept {
     // The BAP lock serializes publication and incoming activity messages, so replacing the whole
     // fixed map here exposes either the prior delivered roster or this complete delivered roster.
     session.activityRosterDecode = session.activityRosterStaged.decodeMap;
+    // A leave delta retires every group and carries no Auth body, so it settles no estate debt.
+    if (!session.activityRosterStaged.peerLeave) {
+        session.activityEstateRevision = session.activityRosterStaged.estateRevision;
+    }
     if (!session.activityRosterStaged.peerLeave) {
         const bool answeredArrival =
             session.activityRosterAwaitClientSync && !session.activityRosterStaged.awaitClientSync;

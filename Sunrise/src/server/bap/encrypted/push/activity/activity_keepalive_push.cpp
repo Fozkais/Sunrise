@@ -219,6 +219,20 @@ bool consume_activity_keepalive(Session& session,
                == 1
         && server::activity::host::pending_scriptable_override_for_activity_client(
             session.activity.session, session.activity.bindingGeneration, pendingScriptable);
+    // A scripted change is answered on the link that owns it; every other link in the activity
+    // shares the estate but hears of it only through its own next roster. The first try follows
+    // the change at once; a body that cannot be built yet retries on the keepalive cadence.
+    const std::uint64_t estateRevision =
+        active ? server::activity::host::scriptable_estate_revision(session.activity.session) : 0;
+    const bool estateDue =
+        active && !scriptableDue && session.activityPatchEpoch.seen
+        && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration
+        && session.activityRosterSends != 0 && estateRevision != 0
+        && estateRevision != session.activityEstateRevision
+        && (estateRevision != session.activityEstateAttemptedRevision || keepaliveDue);
+    if (estateDue) {
+        session.activityEstateAttemptedRevision = estateRevision;
+    }
     server::activity::host::PendingIncident pendingIncident{};
     const bool hasPendingIncident =
         active
@@ -337,9 +351,9 @@ bool consume_activity_keepalive(Session& session,
         }
     }
     if (!active
-        || (!keepaliveDue && !regionChanged && !hostStateDue && !scriptableDue && !incidentDue
-            && !authorityResetDue && !authorityQueryDue && !hostTeleportDue && !retirementDue
-            && !arrivalDue && !membershipDue)) {
+        || (!keepaliveDue && !regionChanged && !hostStateDue && !scriptableDue && !estateDue
+            && !incidentDue && !authorityResetDue && !authorityQueryDue && !hostTeleportDue
+            && !retirementDue && !arrivalDue && !membershipDue)) {
         return false;
     }
     touchesScratch = true;
@@ -354,7 +368,7 @@ bool consume_activity_keepalive(Session& session,
     // Only a changed Host value, retirement or the arrival answer can publish a standalone roster.
     if (!keepaliveDue && !regionChanged && !hostTeleportDue && !membershipDue) {
         bool appendedRoster = false;
-        if (hostStateDue || scriptableDue || retirementDue || arrivalDue) {
+        if (hostStateDue || scriptableDue || estateDue || retirementDue || arrivalDue) {
             appendedRoster = append_roster_notification(
                 session, scratch, key, nextSendNonce, scratch.framed, framedSize);
             published = appendedRoster;
@@ -435,7 +449,8 @@ bool consume_activity_keepalive(Session& session,
             published = appended || published;
             SecureZeroMemory(&plan, sizeof plan);
         }
-        if (appended || hostStateDue || scriptableDue || retirementDue || arrivalDue) {
+        if (appended || hostStateDue || scriptableDue || estateDue || retirementDue
+            || arrivalDue) {
             published = append_roster_notification(
                             session, scratch, key, nextSendNonce, scratch.framed, framedSize)
                         || published;
@@ -605,7 +620,8 @@ bool consume_activity_keepalive(Session& session,
     // push could have been read at all. Without it a correct body and a deduped one look the same.
     const std::uint32_t reportedRevision = refresh.snapshot.revision;
     SecureZeroMemory(&refresh, sizeof refresh);
-    if (appendedMembership || hostStateDue || scriptableDue || retirementDue || arrivalDue) {
+    if (appendedMembership || hostStateDue || scriptableDue || estateDue || retirementDue
+        || arrivalDue) {
         published = append_roster_notification(
                         session, scratch, key, nextSendNonce, scratch.framed, framedSize)
                     || published;

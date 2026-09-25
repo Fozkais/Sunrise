@@ -174,6 +174,8 @@ struct RosterPublication {
     std::uint8_t squadStateSequence{};
     /** Activity Host state revision carried by this body. */
     std::uint64_t hostStateRevision{};
+    /** Scriptable Auth estate revision read before this body copied the estate. */
+    std::uint64_t estateRevision{};
     /** SDK selected-state roster lease revision carried by this body. */
     std::uint64_t missionSeedRevision{};
     /** Type-17 lifetime state carried for that revision. */
@@ -468,6 +470,14 @@ struct Session {
     std::uint8_t activityRosterState{};
     /** Latest Activity Host revision staged into this connection's transport output. */
     std::uint64_t activityHostStateRevision{};
+    /**
+     * Scriptable Auth estate revision the last delivered roster carried. A scripted change is
+     * answered on the owning link only, so any other link in the activity lags it until the
+     * keepalive republishes that link's roster.
+     */
+    std::uint64_t activityEstateRevision{};
+    /** Estate revision last tried; a roster that cannot be built retries on the keepalive only. */
+    std::uint64_t activityEstateAttemptedRevision{};
     /** The delivered roster carries the team wait bit; the arrival report is answered while set. */
     bool activityRosterAwaitClientSync{};
     /** One bounded authority-mask readback owned by this exact ActivityClient generation. */

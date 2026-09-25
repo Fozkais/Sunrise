@@ -194,6 +194,11 @@ struct Instance final {
     std::array<ScriptableGuard, kScriptableGuardCapacity> scriptableGuards{};
     /** Latest delivered body for every full ClientRef, re-emitted by every later msg-5 body. */
     std::vector<PendingScriptableOverride> scriptableAuthEstate{};
+    /**
+     * Advances whenever the estate above changes. Only the owning link is answered with the body
+     * that changed it, so this is how every other link in the activity learns its roster is stale.
+     */
+    std::uint64_t scriptableEstateRevision{};
     PendingScriptableOverride pendingScriptable{};
     /** Committed bodies waiting on the same push as the head. Never a squad or a lifetime. */
     std::array<PendingScriptableOverride, kPendingScriptableTailCapacity> pendingScriptableTail{};

@@ -460,6 +460,16 @@ bool scriptable_auth_estate(const state::activity::SessionBinding& binding,
     return copied;
 }
 
+/** Reads the revision every roster built from the estate above carries. */
+std::uint64_t scriptable_estate_revision(const state::activity::SessionBinding& binding) noexcept {
+    AcquireSRWLockShared(&g_lock);
+    const Instance* const instance = find_instance(binding);
+    const std::uint64_t revision =
+        instance != nullptr && instance->view.active ? instance->scriptableEstateRevision : 0;
+    ReleaseSRWLockShared(&g_lock);
+    return revision;
+}
+
 namespace detail {
 
 /** Encodes one type-31 arm or disarm. */

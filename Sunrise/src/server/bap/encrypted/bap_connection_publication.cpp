@@ -69,6 +69,8 @@ void reset_join_state(Session& session) noexcept {
     session.activityRosterSends = 0;
     session.activityRosterRegionBubble = -1;
     session.activityHostStateRevision = 0;
+    session.activityEstateRevision = 0;
+    session.activityEstateAttemptedRevision = 0;
     session.activityRosterAwaitClientSync = false;
     authority_query::reset(session.activityAuthorityQuery, session.activity.bindingGeneration);
     authority_reset::reset(session.activityAuthorityReset, session.activity.bindingGeneration);
@@ -218,6 +220,9 @@ void publish_connection_fields(Session& session,
         session.activityRosterBubbleOrderCount = 0;
         session.activityRosterBubbleKeyOrderCount = {};
         session.activityRosterRegionBubble = -1;
+        // The new container holds no Auth body, so the whole estate is owed again.
+        session.activityEstateRevision = 0;
+        session.activityEstateAttemptedRevision = 0;
     }
     // A private join burst delivered the seed membership body; commit the matching identity so
     // State and the delivered-body record agree with what the client now holds.

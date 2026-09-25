@@ -196,7 +196,9 @@ namespace detail {
 [[nodiscard]] bool retain_scriptable_auth(Instance& instance,
                                           const PendingScriptableOverride& pending,
                                           std::uint64_t sourceGeneration) noexcept {
+    // A lifetime carries no body, but every other link still needs a roster to publish it.
     if (pending.kind == ScriptableOverrideKind::lifetime) {
+        instance.scriptableEstateRevision = next_nonzero(instance.scriptableEstateRevision);
         return true;
     }
     if (pending.byteCount == 0 || pending.byteCount > pending.body.size()) {
@@ -209,6 +211,7 @@ namespace detail {
     for (PendingScriptableOverride& retained : instance.scriptableAuthEstate) {
         if (same_client_ref(retained.target, pending.target)) {
             retained = owned;
+            instance.scriptableEstateRevision = next_nonzero(instance.scriptableEstateRevision);
             return true;
         }
     }
@@ -217,6 +220,7 @@ namespace detail {
     } catch (const std::bad_alloc&) {
         return false;
     }
+    instance.scriptableEstateRevision = next_nonzero(instance.scriptableEstateRevision);
     return true;
 }
 
