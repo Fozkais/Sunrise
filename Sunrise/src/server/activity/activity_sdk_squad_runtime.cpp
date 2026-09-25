@@ -1,10 +1,13 @@
 #include "activity_sdk_squad_runtime.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
+#include <cstdio>
 #include <limits>
 #include <string_view>
 
+#include "../../core/logging/log.h"
 #include "../../middleware/content/packages/tables/region_reader.h"
 #include "../../state/activity/runtime.h"
 #include "../../state/build_data/runtime.h"
@@ -428,6 +431,95 @@ retirement_eligibility(const sdk::BoundView& view,
     return result;
 }
 
+/** @return Bubble ordinal of one squad's authored occurrence, or -1 when it has none. */
+[[nodiscard]] std::int32_t squad_bubble(const sdk::Catalog& catalog,
+                                        std::uint32_t squadRow) noexcept {
+    const auto squads = catalog.squads();
+    const auto occurrences = catalog.occurrences();
+    const auto bubbles = catalog.bubbles();
+    if (squadRow >= squads.size() || squads[squadRow].occurrenceIndex >= occurrences.size()) {
+        return -1;
+    }
+    const format::Occurrence& occurrence = occurrences[squads[squadRow].occurrenceIndex];
+    if (occurrence.bubbleIndex >= bubbles.size()
+        || bubbles[occurrence.bubbleIndex].bubbleOrdinal >= layouts::kBubbleCapacity) {
+        return -1;
+    }
+    return static_cast<std::int32_t>(bubbles[occurrence.bubbleIndex].bubbleOrdinal);
+}
+
+/** @return Stable log name of one routing reason. */
+[[nodiscard]] const char* route_reason_name(server::bap::SquadRouteReason reason) noexcept {
+    switch (reason) {
+    case server::bap::SquadRouteReason::owner:
+        return "owner";
+    case server::bap::SquadRouteReason::retained:
+        return "retained";
+    case server::bap::SquadRouteReason::ambassador:
+        return "ambassador";
+    case server::bap::SquadRouteReason::ambassadorUnlinked:
+        return "ambassador_unlinked";
+    }
+    return "unknown";
+}
+
+/**
+ * Prepares one squad for the link that must receive it.
+ * The owner's view resolves it first, which names the generated object. When another link
+ * simulates the squad's bubble, or already retains that object, the squad is resolved again
+ * against that link's own region and goes there. A route that cannot resolve keeps the owner's.
+ * @param report Logs every decision that leaves the owner, and every one that could not.
+ */
+[[nodiscard]] Status prepare_routed(const sdk::BoundView& view,
+                                    std::uint32_t squadRow,
+                                    std::span<const std::int32_t> requestedCounts,
+                                    squad_auth::Mode mode,
+                                    PreparedSquad& output,
+                                    bool report) noexcept {
+    const Status ownerStatus = prepare(view, squadRow, requestedCounts, mode, output);
+    if (view.catalog == nullptr) {
+        return ownerStatus;
+    }
+    const std::int32_t bubble = squad_bubble(*view.catalog, squadRow);
+    const server::bap::SquadRoute route =
+        server::bap::squad_route(view.binding,
+                                 view.activityClientGeneration,
+                                 ownerStatus == Status::ready ? output.target.registryKey : 0,
+                                 bubble);
+    Status status = ownerStatus;
+    const bool rerouted = route.generation != view.activityClientGeneration;
+    if (rerouted) {
+        sdk::BoundView routed = view;
+        routed.activityClientGeneration = route.generation;
+        PreparedSquad candidate{};
+        status = prepare(routed, squadRow, requestedCounts, mode, candidate);
+        if (status == Status::ready) {
+            output = candidate;
+        }
+    }
+    if (report && (rerouted || route.reason == server::bap::SquadRouteReason::ambassadorUnlinked)) {
+        std::array<char, core::log::kLineCapacity> line{};
+        const int written = std::snprintf(
+            line.data(),
+            line.size(),
+            "ev=activity stage=squad_route result=%s reason=%s squad=%u bubble=%d owner_gen=%llu "
+            "gen=%llu status=%s",
+            !rerouted ? "owner" : status == Status::ready ? "routed" : "fallback",
+            route_reason_name(route.reason),
+            static_cast<unsigned>(squadRow),
+            bubble,
+            static_cast<unsigned long long>(view.activityClientGeneration),
+            static_cast<unsigned long long>(route.generation),
+            status_name(status));
+        if (written > 0) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::info,
+                             {line.data(), static_cast<std::size_t>(written)});
+        }
+    }
+    return status == Status::ready || !rerouted ? status : ownerStatus;
+}
+
 } // namespace
 
 /** Availability checks never register reuse before Auth delivery. */
@@ -497,7 +589,7 @@ Status availability(const sdk::BoundView& view,
     (void)nameHash;
     (void)retireOnReturn;
     PreparedSquad prepared{};
-    const Status status = prepare(view, squadRow, requestedCounts, mode, prepared);
+    const Status status = prepare_routed(view, squadRow, requestedCounts, mode, prepared, false);
     if (status != Status::ready) {
         return status;
     }
@@ -522,7 +614,7 @@ Status place(const sdk::BoundView& view,
              std::optional<std::uint32_t> destinationSquadRow,
              std::optional<std::uint32_t> spawnRuleSlotRow) noexcept {
     PreparedSquad prepared{};
-    const Status status = prepare(view, squadRow, requestedCounts, mode, prepared);
+    const Status status = prepare_routed(view, squadRow, requestedCounts, mode, prepared, true);
     if (status != Status::ready) {
         return status;
     }
@@ -569,7 +661,7 @@ Status place_reserved(const sdk::BoundView& view,
                       std::optional<std::uint32_t> destinationSquadRow,
                       std::optional<std::uint32_t> spawnRuleSlotRow) noexcept {
     PreparedSquad prepared{};
-    const Status status = prepare(view, squadRow, requestedCounts, mode, prepared);
+    const Status status = prepare_routed(view, squadRow, requestedCounts, mode, prepared, true);
     if (status != Status::ready) {
         return status;
     }

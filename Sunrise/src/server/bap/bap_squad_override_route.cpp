@@ -5,8 +5,11 @@
 #include <cstdint>
 #include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <span>
 
+#include "../../core/settings/settings.h"
+#include "../../state/activity/bubble_authority/ambassadors.h"
 #include "../../state/build_data/runtime.h"
 #include "../activity/host_runtime.h"
 #include "internal.h"
@@ -350,6 +353,59 @@ bool request_activity_squad_override(
                                                                   destination,
                                                                   spawnRule);
     return queued;
+}
+
+/** Picks the ActivityClient generation a squad body goes to in a shared activity. */
+SquadRoute squad_route(const state::activity::SessionBinding& binding,
+                       std::uint64_t ownerGeneration,
+                       std::uint32_t registryKey,
+                       std::int32_t bubble) noexcept {
+    SquadRoute route{ownerGeneration, SquadRouteReason::owner};
+    if (ownerGeneration == 0 || !core::settings::get().server.activation.singlePrivateAmbassador) {
+        return route;
+    }
+    const std::shared_lock lock(session_lock());
+    const auto live = [&](const Session& session) noexcept {
+        return session.id != 0 && session.authenticated
+               && session.activity.role == ActivityClientRole::privateCurrent
+               && session.activity.bindingGeneration != 0
+               && state::activity::same_binding(session.activity.session, binding);
+    };
+    // An object whose squads a link already retains stays on that link: its later bodies are
+    // composed onto the ones that link holds, and a second link would spawn the squad again.
+    for (const Session& session : sessions()) {
+        const SquadOverrideLease& lease = session.activitySquadOverride;
+        if (registryKey == 0 || !live(session) || !lease.active
+            || lease.bindingGeneration != session.activity.bindingGeneration) {
+            continue;
+        }
+        for (std::size_t index = 0; index < lease.groupCount; ++index) {
+            if (lease.groups[index].scopeTarget.registryKey == registryKey) {
+                return {session.activity.bindingGeneration, SquadRouteReason::retained};
+            }
+        }
+    }
+    std::uint64_t ambassador = 0;
+    if (bubble < 0 || bubble >= static_cast<std::int32_t>(
+                                    state::activity::bubble_authority::kAmbassadorBubbleCount)
+        || !state::activity::bubble_authority::bubble_ambassador(
+            binding.sessionId, static_cast<std::uint8_t>(bubble), ambassador)
+        || ambassador == 0) {
+        return route;
+    }
+    std::size_t matches = 0;
+    std::uint64_t generation = 0;
+    for (const Session& session : sessions()) {
+        if (live(session) && session.activityMemberKey == ambassador) {
+            generation = session.activity.bindingGeneration;
+            ++matches;
+        }
+    }
+    if (matches == 1) {
+        return {generation, SquadRouteReason::ambassador};
+    }
+    route.reason = SquadRouteReason::ambassadorUnlinked;
+    return route;
 }
 
 } // namespace sunrise::server::bap

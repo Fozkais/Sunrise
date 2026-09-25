@@ -1,5 +1,8 @@
 #include <algorithm>
+#include <array>
+#include <cstdio>
 
+#include "../../core/logging/log.h"
 #include "../../middleware/bap/activity_message/squad_objective_auth.h"
 #include "activity_sdk_device_internal.h"
 
@@ -43,12 +46,42 @@ assign_combat_objective_reserved(const state::activity_sdk::BoundView& view,
         return Status::invalidValue;
     }
     detail::PreparedDevice prepared{};
-    const Status status = detail::prepare_slot(view, decision.firstRow, prepared);
+    Status status = detail::prepare_slot(view, decision.firstRow, prepared);
     if (status != Status::ready) {
         return status;
     }
+    // The objective composes onto the squad's placement, so it goes to the link that placed it.
+    state::activity_sdk::BoundView routed = view;
+    const server::bap::SquadRoute route = server::bap::squad_route(
+        view.binding, view.activityClientGeneration, prepared.target.registryKey, -1);
+    if (route.generation != view.activityClientGeneration) {
+        routed.activityClientGeneration = route.generation;
+        detail::PreparedDevice candidate{};
+        status = detail::prepare_slot(routed, decision.firstRow, candidate);
+        std::array<char, core::log::kLineCapacity> line{};
+        const int written = std::snprintf(line.data(),
+                                          line.size(),
+                                          "ev=activity stage=squad_route result=%s "
+                                          "reason=objective slot=%u owner_gen=%llu gen=%llu",
+                                          status == Status::ready ? "routed" : "fallback",
+                                          static_cast<unsigned>(decision.firstRow),
+                                          static_cast<unsigned long long>(
+                                              view.activityClientGeneration),
+                                          static_cast<unsigned long long>(route.generation));
+        if (written > 0) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::info,
+                             {line.data(), static_cast<std::size_t>(written)});
+        }
+        if (status == Status::ready) {
+            prepared = candidate;
+        } else {
+            routed = view;
+        }
+    }
     detail::PreparedDevice objectiveSlot{};
-    const Status objectiveStatus = detail::prepare_slot(view, decision.secondRow, objectiveSlot);
+    const Status objectiveStatus =
+        detail::prepare_slot(routed, decision.secondRow, objectiveSlot);
     if (objectiveStatus != Status::ready
         || prepared.activityClientGeneration != objectiveSlot.activityClientGeneration
         || prepared.target.registryKey != objectiveSlot.target.registryKey) {
