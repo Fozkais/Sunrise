@@ -224,15 +224,30 @@ bool consume_activity_keepalive(Session& session,
     // the change at once; a body that cannot be built yet retries on the keepalive cadence.
     const std::uint64_t estateRevision =
         active ? server::activity::host::scriptable_estate_revision(session.activity.session) : 0;
-    const bool estateDue =
+    const bool rosterReady =
         active && !scriptableDue && session.activityPatchEpoch.seen
         && session.activityPatchEpoch.bindingGeneration == session.activity.bindingGeneration
-        && session.activityRosterSends != 0 && estateRevision != 0
-        && estateRevision != session.activityEstateRevision
-        && (estateRevision != session.activityEstateAttemptedRevision || keepaliveDue);
-    if (estateDue) {
+        && session.activityRosterSends != 0;
+    const bool estateStale = rosterReady && estateRevision != 0
+                             && estateRevision != session.activityEstateRevision
+                             && (estateRevision != session.activityEstateAttemptedRevision
+                                 || keepaliveDue);
+    if (estateStale) {
         session.activityEstateAttemptedRevision = estateRevision;
     }
+    // Each unheard dialogue line needs a body of its own, so the log drains one push at a time.
+    server::activity::host::PendingScriptableOverride nextPulse{};
+    const bool dialogueDue =
+        rosterReady
+        && server::activity::host::next_dialogue_pulse(session.activity.session,
+                                                       session.activityDialogueSerial,
+                                                       session.activity.bindingGeneration,
+                                                       nextPulse)
+        && (nextPulse.estateSerial != session.activityDialogueAttemptedSerial || keepaliveDue);
+    if (dialogueDue) {
+        session.activityDialogueAttemptedSerial = nextPulse.estateSerial;
+    }
+    const bool estateDue = estateStale || dialogueDue;
     server::activity::host::PendingIncident pendingIncident{};
     const bool hasPendingIncident =
         active

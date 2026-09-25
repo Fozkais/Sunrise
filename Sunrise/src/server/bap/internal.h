@@ -488,6 +488,8 @@ struct Session {
     std::uint64_t activityDialogueSerial{};
     /** Serial the roster being built would advance the cursor above to; staged with the body. */
     std::uint64_t activityDialogueSerialBuilt{};
+    /** Dialogue serial last tried; a line whose roster cannot be built retries on the keepalive. */
+    std::uint64_t activityDialogueAttemptedSerial{};
     /** The delivered roster carries the team wait bit; the arrival report is answered while set. */
     bool activityRosterAwaitClientSync{};
     /** One bounded authority-mask readback owned by this exact ActivityClient generation. */

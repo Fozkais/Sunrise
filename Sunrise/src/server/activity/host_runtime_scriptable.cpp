@@ -211,6 +211,17 @@ namespace detail {
     // The serial orders a pulse body, such as a dialogue line, against each link's cursor.
     const std::uint64_t serial = next_nonzero(instance.scriptableEstateRevision);
     owned.estateSerial = serial;
+    if (owned.kind == ScriptableOverrideKind::dialogue) {
+        // A member far enough behind to fall off the log skips the oldest lines, never newer.
+        if (instance.dialoguePulses.size() >= kDialoguePulseCapacity) {
+            instance.dialoguePulses.erase(instance.dialoguePulses.begin());
+        }
+        try {
+            instance.dialoguePulses.push_back(owned);
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+    }
     for (PendingScriptableOverride& retained : instance.scriptableAuthEstate) {
         if (same_client_ref(retained.target, pending.target)) {
             retained = owned;

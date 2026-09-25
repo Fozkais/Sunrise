@@ -377,9 +377,12 @@ bool append_roster_notification(
         session.activityRosterState = initialRosterState;
         session.activityRosterRegionEpoch = initialRegionEpoch;
         session.activityRosterRegionBubble = initialRegionBubble;
-        // The client already holds this exact body, estate included, so nothing is owed.
+        // The client already holds this exact body, estate included, so nothing is owed. A body
+        // left unchanged carried no replayed line, so one it passed over is settled as well.
         if (!peerLeave) {
             session.activityEstateRevision = estateRevision;
+            session.activityDialogueSerial =
+                (std::max)(session.activityDialogueSerial, session.activityDialogueSerialBuilt);
         }
         report_roster_push(
             session, snapshot, name, 0, kNoGrant, RosterOutcome::unchanged, bodyHash, forced);

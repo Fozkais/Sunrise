@@ -199,6 +199,12 @@ struct Instance final {
      * that changed it, so this is how every other link in the activity learns its roster is stale.
      */
     std::uint64_t scriptableEstateRevision{};
+    /**
+     * Every delivered dialogue line in delivery order, oldest first. The estate keeps only the
+     * latest body per sensor, but each line is its own pulse, and every fireteam member has to
+     * hear each one, so members replay this log through their own cursor.
+     */
+    std::vector<PendingScriptableOverride> dialoguePulses{};
     PendingScriptableOverride pendingScriptable{};
     /** Committed bodies waiting on the same push as the head. Never a squad or a lifetime. */
     std::array<PendingScriptableOverride, kPendingScriptableTailCapacity> pendingScriptableTail{};

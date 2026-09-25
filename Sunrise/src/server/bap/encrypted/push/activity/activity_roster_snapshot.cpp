@@ -5,6 +5,7 @@
 #include <string_view>
 #include <vector>
 
+#include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/bap/activity_message/darkness_zone_auth.h"
 #include "../../../../../middleware/bap/activity_message/ghost_link_sense.h"
 #include "../../../../../middleware/content/packages/tables/region_reader.h"
@@ -376,13 +377,9 @@ build_roster_snapshot(Session& session,
         }
         // A dialogue body is a pulse: the client plays one line of the cue each time it applies
         // the body, and it applies every body of every msg 5. So it goes out once, in the push
-        // that delivers it, and the slot then carries no body. That push reaches the owner only;
-        // every other fireteam link gets the line once, in its first roster past its cursor.
-        const bool dialogue =
-            retained.kind == server::activity::host::ScriptableOverrideKind::dialogue;
-        if (dialogue
-            && (retained.expectedActivityClientGeneration == session.activity.bindingGeneration
-                || retained.estateSerial <= session.activityDialogueSerial)) {
+        // that delivers it, and the slot then carries no body. Members replay the dialogue log
+        // below instead.
+        if (retained.kind == server::activity::host::ScriptableOverrideKind::dialogue) {
             continue;
         }
         const server::activity::host::ScriptableTarget& target = retained.target;
@@ -419,27 +416,48 @@ build_roster_snapshot(Session& session,
             }
         }
         message::AuthOverride value{};
-        const bool installed = make_auth_override(retained, value)
-                               && install_auth_override(layout,
-                                                        region,
-                                                        scratch,
-                                                        snapshot,
-                                                        value,
-                                                        target.rosterGroupIndex,
-                                                        target.rosterSlotOffset,
-                                                        target.stateLocalRoster);
-        // A replayed line is a courtesy to a member who missed it; losing it must never cost
-        // that member the rest of its roster.
-        if (!installed && dialogue) {
-            continue;
-        }
-        if (!installed) {
+        if (!make_auth_override(retained, value)
+            || !install_auth_override(layout,
+                                      region,
+                                      scratch,
+                                      snapshot,
+                                      value,
+                                      target.rosterGroupIndex,
+                                      target.rosterSlotOffset,
+                                      target.stateLocalRoster)) {
             return refuse_override("retained_auth_apply");
         }
-        // Only a line this body really carries counts as heard.
-        if (dialogue) {
-            session.activityDialogueSerialBuilt =
-                (std::max)(session.activityDialogueSerialBuilt, retained.estateSerial);
+    }
+    // The owning link hears each line in the push that delivers it. Every other fireteam link
+    // replays the dialogue log: one line per body, the oldest it has not heard, because one msg 5
+    // holds one body per sensor. Its cursor moves only with a delivered body, and the keepalive
+    // keeps pushing while lines remain. A line this region cannot place is passed over, so it can
+    // neither stall the log nor cost the member the rest of its roster.
+    server::activity::host::PendingScriptableOverride pulse{};
+    if (server::activity::host::next_dialogue_pulse(session.activity.session,
+                                                    session.activityDialogueSerial,
+                                                    session.activity.bindingGeneration,
+                                                    pulse)) {
+        session.activityDialogueSerialBuilt = pulse.estateSerial;
+        const server::activity::host::ScriptableTarget& target = pulse.target;
+        message::AuthOverride value{};
+        const bool placeable =
+            !target.stateLocalRoster
+            && canonical_group_status(layout, region, target.rosterGroupIndex)
+                   == CanonicalGroupStatus::active
+            && make_auth_override(pulse, value);
+        if (placeable
+            && !install_auth_override(layout,
+                                      region,
+                                      scratch,
+                                      snapshot,
+                                      value,
+                                      target.rosterGroupIndex,
+                                      target.rosterSlotOffset,
+                                      false)) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::warn,
+                             "ev=activity stage=dialogue_replay result=install_refused");
         }
     }
     // The pending override's group goes after the retained estate, where the next push will place

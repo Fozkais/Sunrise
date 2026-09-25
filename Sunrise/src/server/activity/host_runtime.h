@@ -50,6 +50,8 @@ inline constexpr std::size_t kSquadObjectiveGroupCount = 24;
 /** Distinct exact ClientRef counters retained for one activity generation. */
 inline constexpr std::size_t kScriptableGuardCapacity =
     state::build_data::scenarios::kRosterSlotCapacity;
+/** Delivered dialogue lines a lagging fireteam member can still replay; a chosen bound. */
+inline constexpr std::size_t kDialoguePulseCapacity = 64;
 /** State-local SDK groups are carried with the request instead of indexing the baseline census. */
 inline constexpr std::uint16_t kGeneratedRosterGroupIndex = 0xFFFFU;
 /** No generated SDK object backs this ordinary canonical roster target. */
@@ -932,6 +934,17 @@ pending_scriptable_tail(const state::activity::SessionBinding& binding,
  */
 [[nodiscard]] bool scriptable_owner_generation(const state::activity::SessionBinding& binding,
                                                std::uint64_t& generation) noexcept;
+
+/**
+ * Reads the oldest delivered dialogue line one link has not heard.
+ * @param afterSerial The link's cursor; only lines retained past it are considered.
+ * @param listenerGeneration The link's own generation; lines it heard live are passed over.
+ * @return False when the link has heard every line the log still holds.
+ */
+[[nodiscard]] bool next_dialogue_pulse(const state::activity::SessionBinding& binding,
+                                       std::uint64_t afterSerial,
+                                       std::uint64_t listenerGeneration,
+                                       PendingScriptableOverride& output) noexcept;
 
 /** @return The binding's estate revision, zero before anything was delivered or when absent. */
 [[nodiscard]] std::uint64_t

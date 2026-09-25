@@ -481,6 +481,29 @@ bool scriptable_owner_generation(const state::activity::SessionBinding& binding,
     return generation != 0;
 }
 
+/** Reads the oldest delivered dialogue line one link has not heard. */
+bool next_dialogue_pulse(const state::activity::SessionBinding& binding,
+                         std::uint64_t afterSerial,
+                         std::uint64_t listenerGeneration,
+                         PendingScriptableOverride& output) noexcept {
+    output = {};
+    bool found = false;
+    AcquireSRWLockShared(&g_lock);
+    const Instance* const instance = find_instance(binding);
+    if (instance != nullptr && instance->view.active) {
+        for (const PendingScriptableOverride& pulse : instance->dialoguePulses) {
+            if (pulse.estateSerial > afterSerial
+                && pulse.expectedActivityClientGeneration != listenerGeneration) {
+                output = pulse;
+                found = true;
+                break;
+            }
+        }
+    }
+    ReleaseSRWLockShared(&g_lock);
+    return found;
+}
+
 /** Reads the revision every roster built from the estate above carries. */
 std::uint64_t scriptable_estate_revision(const state::activity::SessionBinding& binding) noexcept {
     AcquireSRWLockShared(&g_lock);
