@@ -38,11 +38,11 @@ find_device_observation(RuntimeInstance& instance, const host::SenseObservationK
 /**
  * Publishes current device levels only when accepted client reports change them.
  * @param instance Bound mission instance retaining previous device levels.
- * @param sense Accepted observations for its current client generation.
+ * @param sense Accepted observations from the owner's link or a live member link.
  */
 void push_device_edges(RuntimeInstance& instance,
                        const host::SenseObservationSnapshot& sense) noexcept {
-    if (sense.sourceGeneration != instance.view.activityClientGeneration
+    if (!accepts_member_sense(instance, sense.sourceGeneration)
         || sense.observationCount > sense.observations.size()
         || sense.valueCount > sense.values.size()) {
         return;

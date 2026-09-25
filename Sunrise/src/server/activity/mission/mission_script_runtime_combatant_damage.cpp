@@ -39,11 +39,11 @@ find_combatant_damage(RuntimeInstance& instance, const host::SenseObservationKey
 /**
  * Raises damage-state observations without inferring actor attachment or provocation.
  * @param instance Bound mission instance retaining prior combatant levels.
- * @param sense Accepted observations for the current client generation.
+ * @param sense Accepted observations from the owner's link or a live member link.
  */
 void push_combatant_damage_edges(RuntimeInstance& instance,
                                  const host::SenseObservationSnapshot& sense) noexcept {
-    if (sense.sourceGeneration != instance.view.activityClientGeneration
+    if (!accepts_member_sense(instance, sense.sourceGeneration)
         || sense.observationCount > sense.observations.size()
         || sense.valueCount > sense.values.size()) {
         return;

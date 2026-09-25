@@ -303,6 +303,16 @@ struct RuntimeInstance final {
     bool occupied{};
 };
 
+/**
+ * Tests whether a Sense report may drive this program's device and damage edges.
+ * The owner's always may. In a shared activity the member that simulates a bubble reports its
+ * devices and combatants, which is often not the owner, so a live member link of the same activity
+ * may too while one ambassador per private bubble is on.
+ * @param sourceGeneration Generation of the link that sent the report.
+ */
+[[nodiscard]] bool accepts_member_sense(const RuntimeInstance& instance,
+                                        std::uint64_t sourceGeneration) noexcept;
+
 /** Writes one bounded mission-script diagnostic line. Fields are key=value, error is free text. */
 void log_line(core::log::Level level,
               const RuntimeInstance* instance,

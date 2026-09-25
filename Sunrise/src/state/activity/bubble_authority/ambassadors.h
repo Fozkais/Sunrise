@@ -80,15 +80,14 @@ heading_bubble(const membership::MembershipState& member) noexcept {
 
 /**
  * Picks again the member that simulates each bubble of one shared activity.
- * The activity's primary member always simulates the bubble it is in. It owns the mission
- * program, whose device, damage and wipe feeds read only its own client's reports, so a bubble it
- * stands in must stay its own exactly as when it plays alone. Any other bubble goes to the member
- * already simulating it while that member is still there, so two members standing together never
- * trade it back and forth, and otherwise to the lowest joined row in it. A bubble nobody is in
- * goes to a member on its way in, the primary member first and then the one already named, so a
- * second member loading the same bubble never claims it too. A member on its way in never takes a
- * bubble from one already in it: its pending leg may only be a precache, or the region a z-leg
- * switch left behind it. A bubble nobody is in or heading to has no ambassador.
+ * The first member in a bubble keeps it for as long as it stays there, the activity's primary
+ * member included: a member arriving later joins the simulation already running rather than
+ * taking it over, so nothing it spawned is abandoned. A bubble whose ambassador left goes to the
+ * lowest joined row still in it. A bubble nobody is in goes to a member on its way in, the one
+ * already named first and then the lowest row, so a second member loading the same bubble never
+ * claims it too. A member on its way in never takes a bubble from one already in it: its pending
+ * leg may only be a precache, or the region a z-leg switch left behind it. A bubble nobody is in
+ * or heading to has no ambassador.
  * @param record Joined record, held under the State write lock.
  * @param changes Cleared, then receives every bubble whose ambassador moved.
  * @return True when at least one bubble moved.
@@ -98,9 +97,7 @@ inline bool refresh_ambassadors(SessionRecord& record, AmbassadorChanges& change
     std::array<std::uint64_t, kAmbassadorBubbleCount> inside{};
     std::array<std::uint64_t, kAmbassadorBubbleCount> heading{};
     std::array<bool, kAmbassadorBubbleCount> keeps{};
-    std::array<bool, kAmbassadorBubbleCount> primaryInside{};
     std::array<bool, kAmbassadorBubbleCount> headingKeeps{};
-    std::array<bool, kAmbassadorBubbleCount> primaryHeading{};
     auto& current = record.bubbleAuthority.ambassadorKeys;
     const auto usable = [](std::int32_t bubble) noexcept {
         return bubble >= 0 && static_cast<std::size_t>(bubble) < kAmbassadorBubbleCount;
@@ -116,7 +113,6 @@ inline bool refresh_ambassadors(SessionRecord& record, AmbassadorChanges& change
         if (const std::int32_t bubble = member_bubble(*member); usable(bubble)) {
             const auto index = static_cast<std::size_t>(bubble);
             keeps[index] = keeps[index] || current[index] == key;
-            primaryInside[index] = primaryInside[index] || row == 0;
             if (inside[index] == 0) {
                 inside[index] = key;
             }
@@ -124,20 +120,17 @@ inline bool refresh_ambassadors(SessionRecord& record, AmbassadorChanges& change
         if (const std::int32_t bubble = heading_bubble(*member); usable(bubble)) {
             const auto index = static_cast<std::size_t>(bubble);
             headingKeeps[index] = headingKeeps[index] || current[index] == key;
-            primaryHeading[index] = primaryHeading[index] || row == 0;
             if (heading[index] == 0) {
                 heading[index] = key;
             }
         }
     }
     for (std::size_t bubble = 0; bubble < kAmbassadorBubbleCount; ++bubble) {
-        // Row 0 is scanned first, so a primary member inside or heading in is the first key there.
-        const std::uint64_t next = primaryInside[bubble]    ? inside[bubble]
-                                   : keeps[bubble]          ? current[bubble]
-                                   : inside[bubble] != 0    ? inside[bubble]
-                                   : primaryHeading[bubble] ? heading[bubble]
-                                   : headingKeeps[bubble]   ? current[bubble]
-                                                            : heading[bubble];
+        // Rows are scanned in order, so the first key inside or heading in is the lowest row's.
+        const std::uint64_t next = keeps[bubble]          ? current[bubble]
+                                   : inside[bubble] != 0  ? inside[bubble]
+                                   : headingKeeps[bubble] ? current[bubble]
+                                                          : heading[bubble];
         if (next == current[bubble]) {
             continue;
         }

@@ -207,6 +207,23 @@ void observe_peer_region(RuntimeInstance& instance, const host::Event& event) no
     push_script_event(instance, changed);
 }
 
+} // namespace
+
+bool accepts_member_sense(const RuntimeInstance& instance,
+                          std::uint64_t sourceGeneration) noexcept {
+    if (sourceGeneration == 0) {
+        return false;
+    }
+    if (sourceGeneration == instance.view.activityClientGeneration) {
+        return true;
+    }
+    server::bap::ActivityLinkView link{};
+    return core::settings::get().server.activation.singlePrivateAmbassador
+           && server::bap::activity_link_view(instance.view.binding, sourceGeneration, link);
+}
+
+namespace {
+
 /** True when the event may reach a callback for this instance's ActivityClient generation. */
 [[nodiscard]] bool eligible_event(const RuntimeInstance& instance,
                                   const host::Event& event) noexcept {
