@@ -347,6 +347,29 @@ bool append_roster_notification(
     if (grantWithheld) {
         report_grant_withheld(session, grantRegion);
     }
+    // Once a client has arrived, its pending leg names the region behind it, so an ambassador that
+    // walked into a bubble another member was granted before would never ask for it. It asks for
+    // the bubble it stands in whenever the one ahead is not owed to it.
+    const auto heldRegion = static_cast<std::int32_t>(snapshot.region);
+    if (!snapshot.hasGrant && !peerLeave && !placedRetirementPending
+        && core::settings::get().server.activation.singlePrivateAmbassador
+        && session.activity.role == ActivityClientRole::privateCurrent && heldRegion >= 0
+        && grantRegion >= 0
+        && (heldRegion >> state::activity::bubble_authority::kSliceSetToBubbleShift)
+               != (grantRegion >> state::activity::bubble_authority::kSliceSetToBubbleShift)
+        && private_region(session, heldRegion)) {
+        bool heldWithheld = false;
+        if (state::activity::bubble_authority::select_grant(session.activity.session.sessionId,
+                                                            heldRegion,
+                                                            grant,
+                                                            client_region_ready(session, refresh),
+                                                            session.activityMemberKey,
+                                                            &heldWithheld)) {
+            snapshot.hasGrant = true;
+            snapshot.grant.bubble = grant.bubble;
+            snapshot.grant.token = grant.token;
+        }
+    }
 
     const std::size_t initialWritten = written;
     auto initialNonce = nonce;
