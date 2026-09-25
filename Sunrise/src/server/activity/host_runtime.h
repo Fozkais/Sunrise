@@ -923,6 +923,14 @@ pending_scriptable_tail(const state::activity::SessionBinding& binding,
                                           std::uint64_t activityClientGeneration,
                                           std::vector<PendingScriptableOverride>& output) noexcept;
 
+/**
+ * Reads the ActivityClient generation the binding's scripted output is authorized for: the pending
+ * body's, else the most recently delivered one's.
+ * @return False when nothing scripted has named an owner yet.
+ */
+[[nodiscard]] bool scriptable_owner_generation(const state::activity::SessionBinding& binding,
+                                               std::uint64_t& generation) noexcept;
+
 /** @return The binding's estate revision, zero before anything was delivered or when absent. */
 [[nodiscard]] std::uint64_t
 scriptable_estate_revision(const state::activity::SessionBinding& binding) noexcept;

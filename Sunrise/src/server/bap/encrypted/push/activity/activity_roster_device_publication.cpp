@@ -8,6 +8,7 @@
 #include "../../../../../core/logging/log.h"
 #include "../../../../../middleware/bap/activity_message/scriptable_auth_body.h"
 #include "../../../../../state/activity/mission/runtime.h"
+#include "../../../activity_link_selection.h"
 #include "../../../internal.h"
 
 namespace sunrise::server::bap::encrypted::push::activity {
@@ -87,7 +88,18 @@ bool stage_roster_device_publications(Session& session,
     if (!collect_roster_device_publications(snapshot, scratch.rosterDevicePublications, count)) {
         return false;
     }
-    if (count != 0
+    // Every roster copies the estate, so a fireteam member's body carries the same device
+    // requests. Only the owning link may take their report ownership: the owner's reports are the
+    // ones that join them, and a member's copy would leave nothing able to satisfy them. A new
+    // owner generation, after a rejoin, takes them once the old link is gone.
+    std::uint64_t owner = 0;
+    std::size_t ownerLinks = 0;
+    const bool foreign =
+        server::activity::host::scriptable_owner_generation(session.activity.session, owner)
+        && owner != session.activity.bindingGeneration
+        && activity_link_for_generation_locked(session.activity.session, owner, ownerLinks)
+               != nullptr;
+    if (count != 0 && !foreign
         && server::activity::host::publication_input_boundary(session.activity.session,
                                                               boundary.attemptGeneration,
                                                               boundary.inputSequence,

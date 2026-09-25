@@ -460,6 +460,27 @@ bool scriptable_auth_estate(const state::activity::SessionBinding& binding,
     return copied;
 }
 
+/** Reads the ActivityClient generation the binding's scripted output was last authorized for. */
+bool scriptable_owner_generation(const state::activity::SessionBinding& binding,
+                                 std::uint64_t& generation) noexcept {
+    generation = 0;
+    AcquireSRWLockShared(&g_lock);
+    const Instance* const instance = find_instance(binding);
+    if (instance != nullptr && instance->view.active) {
+        if (ownership::pending(instance)
+            && instance->pendingScriptable.expectedActivityClientGeneration != 0) {
+            generation = instance->pendingScriptable.expectedActivityClientGeneration;
+        }
+        for (auto retained = instance->scriptableAuthEstate.rbegin();
+             generation == 0 && retained != instance->scriptableAuthEstate.rend();
+             ++retained) {
+            generation = retained->expectedActivityClientGeneration;
+        }
+    }
+    ReleaseSRWLockShared(&g_lock);
+    return generation != 0;
+}
+
 /** Reads the revision every roster built from the estate above carries. */
 std::uint64_t scriptable_estate_revision(const state::activity::SessionBinding& binding) noexcept {
     AcquireSRWLockShared(&g_lock);
