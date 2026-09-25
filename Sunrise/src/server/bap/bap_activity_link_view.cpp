@@ -138,6 +138,25 @@ bool activity_link_view_for_member(const state::activity::SessionBinding& bindin
     return true;
 }
 
+/** Lists the private ActivityClients bound to one activity, one per member playing it. */
+std::size_t activity_member_links(const state::activity::SessionBinding& binding,
+                                  std::span<ActivityMemberLink> output) noexcept {
+    std::size_t count = 0;
+    const std::shared_lock lock(session_lock());
+    for (const Session& session : sessions()) {
+        if (count >= output.size()) {
+            break;
+        }
+        if (session.id != 0 && session.authenticated
+            && session.activity.role == ActivityClientRole::privateCurrent
+            && session.activity.bindingGeneration != 0
+            && state::activity::same_binding(session.activity.session, binding)) {
+            output[count++] = {session.activity.bindingGeneration, session.activityMemberKey};
+        }
+    }
+    return count;
+}
+
 /** Selects the exact live ActivityClient for the client's local world slice. */
 bool current_activity_link_view(std::int32_t localSliceSet,
                                 CurrentActivityLinkView& output) noexcept {

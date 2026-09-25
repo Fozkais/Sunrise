@@ -153,6 +153,21 @@ activity_link_count(const state::activity::SessionBinding& binding) noexcept;
                                                  std::uint64_t memberKey,
                                                  ActivityLinkView& output) noexcept;
 
+/** One member's private ActivityClient in a shared activity. */
+struct ActivityMemberLink final {
+    std::uint64_t activityClientGeneration{};
+    std::uint64_t memberKey{};
+};
+
+/**
+ * Lists the private ActivityClients bound to one activity, one per member playing it.
+ * @param binding Exact activity session.
+ * @param output Receives the first links found; the rest are left out.
+ * @return How many were written.
+ */
+[[nodiscard]] std::size_t activity_member_links(const state::activity::SessionBinding& binding,
+                                                std::span<ActivityMemberLink> output) noexcept;
+
 /** Checks whether one exact ActivityClient can change its SDK selected-state roster lease. */
 [[nodiscard]] ActivityMissionSeedLeaseStatus
 activity_mission_seed_available(const state::activity::SessionBinding& binding,
