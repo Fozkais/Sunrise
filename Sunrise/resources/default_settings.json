@@ -55,7 +55,8 @@
       "default_client_activation": true,
       "activity_public_membership": true,
       "prevent_ownerless_channel_close": false,
-      "mission_scripting": true
+      "mission_scripting": true,
+      "single_private_ambassador": true
     }
   },
   "state": {

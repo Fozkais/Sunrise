@@ -10,8 +10,13 @@ namespace sunrise::state::activity::bubble_authority {
 bool select_grant(std::uint64_t sessionId,
                   std::int32_t sliceSetIndex,
                   Grant& grant,
-                  bool enteringBubble) noexcept {
+                  bool enteringBubble,
+                  std::uint64_t requesterKey,
+                  bool* withheld) noexcept {
     grant = {};
+    if (withheld != nullptr) {
+        *withheld = false;
+    }
     if (sessionId == kAbsentSessionId || sliceSetIndex < 0
         || sliceSetIndex > kMaximumGrantSliceSetIndex) {
         return false;
@@ -24,13 +29,26 @@ bool select_grant(std::uint64_t sessionId,
     if (target != kInvalidSessionSlot && bubble < kFallbackBubble) {
         const AuthorityState& authority = state.sessions[target].bubbleAuthority;
         const std::uint16_t previous = authority.grantTokens[bubble];
-        if (previous == 0 || (enteringBubble && !authority.held[bubble])) {
+        const std::uint64_t ambassador = authority.ambassadorKeys[bubble];
+        const std::uint64_t holder = authority.grantHolderKeys[bubble];
+        // Only the member that simulates the bubble may hold its authority. The one that did
+        // before has left the bubble, so its grant is superseded rather than waited for.
+        const bool otherAmbassador =
+            requesterKey != 0 && ambassador != 0 && ambassador != requesterKey;
+        const bool takesOver = requesterKey != 0 && ambassador == requesterKey && holder != 0
+                                && holder != requesterKey;
+        if (otherAmbassador) {
+            if (withheld != nullptr) {
+                *withheld = true;
+            }
+        } else if (previous == 0 || (enteringBubble && !authority.held[bubble]) || takesOver) {
             // A bubble handed back and re-entered must be granted a token the client's mirror
             // has not already seen, so the next one follows the highest ever issued.
             const std::uint16_t issued = authority.issuedTokens[bubble];
             grant.bubble = bubble;
             grant.token = issued < kMaximumGrantToken ? static_cast<std::uint16_t>(issued + 1)
                                                       : kMaximumGrantToken;
+            grant.holderKey = requesterKey;
             owed = true;
         }
     }
@@ -50,6 +68,7 @@ void record_grant(std::uint64_t sessionId, const Grant& grant) noexcept {
         state.sessions[target].bubbleAuthority.grantTokens[grant.bubble] = grant.token;
         state.sessions[target].bubbleAuthority.issuedTokens[grant.bubble] = grant.token;
         state.sessions[target].bubbleAuthority.held[grant.bubble] = true;
+        state.sessions[target].bubbleAuthority.grantHolderKeys[grant.bubble] = grant.holderKey;
     }
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
 }

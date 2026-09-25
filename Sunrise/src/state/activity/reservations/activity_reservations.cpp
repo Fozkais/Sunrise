@@ -5,6 +5,7 @@
 #include "../../account/account_context.h"
 #include "../../account/public_profiles.h"
 #include "../../runtime/storage/internal.h"
+#include "../bubble_authority/ambassadors.h"
 #include "../member_context.h"
 #include "../member_mutation.h"
 #include "../transactions/internal.h"
@@ -304,6 +305,8 @@ bool commit(PendingMutation& mutation) noexcept {
             return false;
         }
     }
+    bubble_authority::AmbassadorChanges ambassadors{};
+    std::uint64_t ambassadorSession = kAbsentSessionId;
     AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
     auto& activity = runtime::storage::g_state.activity;
     auto& record = activity.sessions[prepared.targetSlot];
@@ -400,8 +403,14 @@ bool commit(PendingMutation& mutation) noexcept {
             ++activity.stateRevision;
             record.recordRevision = activity.stateRevision;
         }
+        // A released member no longer simulates the bubbles it held.
+        if (releasedRow < kInvalidMemberRow) {
+            bubble_authority::refresh_shared_ambassadors(activity, record, ambassadors);
+            ambassadorSession = record.sessionId;
+        }
     }
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+    bubble_authority::report_ambassador_changes(ambassadorSession, ambassadors);
     return ready;
 }
 } // namespace sunrise::state::activity::reservations

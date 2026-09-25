@@ -600,6 +600,7 @@
     <ClCompile Include="src\state\activity\transactions\activity_session_release.cpp" />
     <ClCompile Include="src\state\activity\entity_slots\transactions\activity_entity_slot_prepare.cpp" />
     <ClCompile Include="src\state\activity\entity_slots\transactions\activity_entity_slot_commit.cpp" />
+    <ClCompile Include="src\state\activity\bubble_authority\transactions\activity_bubble_authority_ambassadors.cpp" />
     <ClCompile Include="src\state\activity\bubble_authority\transactions\activity_bubble_authority_grant.cpp" />
     <ClCompile Include="src\state\activity\membership\transactions\activity_membership_prepare_base.cpp" />
     <ClCompile Include="src\state\activity\membership\transactions\activity_membership_authoritative_prepare.cpp" />
@@ -1528,6 +1529,7 @@
     <ClInclude Include="src\state\activity\entity_slots\definition.h" />
     <ClInclude Include="src\state\activity\entity_slots\runtime.h" />
     <ClInclude Include="src\state\activity\entity_slots\transactions\internal.h" />
+    <ClInclude Include="src\state\activity\bubble_authority\ambassadors.h" />
     <ClInclude Include="src\state\activity\bubble_authority\definition.h" />
     <ClInclude Include="src\state\activity\bubble_authority\runtime.h" />
     <ClInclude Include="src\state\activity\bubble_authority\transactions\internal.h" />

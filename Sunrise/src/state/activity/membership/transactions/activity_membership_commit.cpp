@@ -4,6 +4,7 @@
 
 #include "../../../account/account_context.h"
 #include "../../../runtime/storage/internal.h"
+#include "../../bubble_authority/ambassadors.h"
 #include "../../member_mutation.h"
 #include "../activity_membership_query.h"
 #include "internal.h"
@@ -186,7 +187,15 @@ bool commit(PendingMutation& mutation, CommittedClientState* clientState) noexce
     if (committed && peerVisible && state.stateRevision != beforeRevision) {
         republish_members(record, prepared.memberRow);
     }
+    // A report can move its member into or out of a bubble, which can move that bubble's
+    // ambassador, and every member's body names it.
+    bubble_authority::AmbassadorChanges ambassadors{};
+    if (committed && prepared.kind == MutationKind::authoritative
+        && state.stateRevision != beforeRevision) {
+        bubble_authority::refresh_shared_ambassadors(state, record, ambassadors);
+    }
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+    bubble_authority::report_ambassador_changes(prepared.sessionId, ambassadors);
     return committed;
 }
 

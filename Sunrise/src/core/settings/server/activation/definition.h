@@ -27,6 +27,13 @@ struct Settings {
     bool preventOwnerlessChannelClose{false};
     /** Enables server Activity Host mission scripts. Off leaves compiled host policy in control. */
     bool missionScripting{false};
+    /**
+     * One ambassador per private bubble in a shared activity. The server picks one present member
+     * for each private bubble and names that member's slot in every member's membership body, and
+     * only that member's link is granted the bubble and handed its squads. Off, every member names
+     * itself on every private record and claims each bubble it enters, as a solo player does.
+     */
+    bool singlePrivateAmbassador{true};
 };
 
 } // namespace sunrise::core::settings::server::activation

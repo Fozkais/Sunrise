@@ -38,6 +38,11 @@ bool Parser::activation_settings(server::activation::Settings& output) noexcept 
                 return false;
             }
             candidate.missionScripting = value;
+        } else if (key == "single_private_ambassador") {
+            if (!boolean(value)) {
+                return false;
+            }
+            candidate.singlePrivateAmbassador = value;
         } else if (!skip_value(0)) {
             return false;
         }

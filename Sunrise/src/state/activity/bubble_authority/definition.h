@@ -29,6 +29,8 @@ inline constexpr std::uint8_t kInvalidBubble = 0xFF;
 struct Grant final {
     std::uint8_t bubble{kInvalidBubble};
     std::uint16_t token{};
+    /** Member key of the link the grant goes to, or zero when the caller named none. */
+    std::uint64_t holderKey{};
 };
 
 /** Persistent grant-token mirrors owned by one activity session. */
@@ -44,6 +46,13 @@ struct AuthorityState final {
     std::array<bool, kAuthoritySlotCount> held{};
     /** Released entities remain pending until their exact claim is delivered. */
     std::array<EntitySlotMask, kAuthoritySlotCount> releasedEntities{};
+    /**
+     * Member key of the member that simulates each bubble in a shared activity, or zero while no
+     * member is there. Every member's membership body names this one member for the bubble.
+     */
+    std::array<std::uint64_t, kAuthoritySlotCount> ambassadorKeys{};
+    /** Member key of the member whose link received each bubble's grant in force, or zero. */
+    std::array<std::uint64_t, kAuthoritySlotCount> grantHolderKeys{};
 };
 
 } // namespace sunrise::state::activity::bubble_authority

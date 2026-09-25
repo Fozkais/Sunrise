@@ -25,6 +25,8 @@ struct ObservedMember final {
 struct MemberDirectory final {
     /** Thirty peers: the native 32-slot table less its owner and Bubble Host. */
     std::array<ObservedMember, 30> peers{};
+    /** Member key of each bubble's ambassador, zero while nobody simulates it. */
+    std::array<std::uint64_t, 64> bubbleAmbassadors{};
     std::uint8_t localSlot{};
     bool valid{};
 };

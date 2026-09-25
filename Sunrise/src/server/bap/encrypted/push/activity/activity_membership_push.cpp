@@ -10,6 +10,7 @@
 #include <string_view>
 
 #include "../../../../../core/logging/log.h"
+#include "../../../../../core/settings/settings.h"
 #include "../../../../../middleware/bap/activity_message/replicate_membership.h"
 #include "../../../../../middleware/encoding/byte_order.h"
 #include "../../../../../middleware/secure_channel/runtime.h"
@@ -229,6 +230,75 @@ make_base_snapshot(const Session& session,
 }
 
 /**
+ * Names, on each private record, the member that simulates that bubble when it is not the
+ * recipient. The ambassadors come from the same State read as the member table, so a named member
+ * is always a row of this body. A member the table does not carry leaves the recipient's own slot
+ * there, and says so, rather than naming a slot the client cannot resolve.
+ * @param mutation Prepared membership operation carrying the ambassador table.
+ * @param wire Body whose member table is already projected; receives the shared records.
+ */
+void project_ambassadors(const state::activity::membership::PendingMutation& mutation,
+                         membership_message::MembershipSnapshot& wire) noexcept {
+    if (!core::settings::get().server.activation.singlePrivateAmbassador
+        || !mutation.memberDirectory.valid) {
+        return;
+    }
+    const auto& ambassadors = mutation.memberDirectory.bubbleAmbassadors;
+    std::array<char, core::log::kLineCapacity> line{};
+    int written = std::snprintf(line.data(),
+                                line.size(),
+                                "ev=activity stage=ambassador_wire local_slot=%u key=0x%llX shared=",
+                                static_cast<unsigned>(wire.localSlot),
+                                static_cast<unsigned long long>(wire.identity.memberKey));
+    for (std::size_t bubble = 0; bubble < ambassadors.size(); ++bubble) {
+        const std::uint64_t key = ambassadors[bubble];
+        if (key == 0 || key == wire.identity.memberKey
+            || ((wire.regionPublicMask >> bubble) & 1U) != 0) {
+            continue;
+        }
+        std::uint8_t slot = 0xFF;
+        for (std::size_t index = 0; index < wire.peers.size(); ++index) {
+            if (wire.peers[index].present && wire.peers[index].identity.memberKey == key) {
+                slot = membership_message::peer_slot(wire, index);
+                break;
+            }
+        }
+        if (slot == 0xFF || slot == wire.localSlot || slot == membership_message::kServiceHostSlot) {
+            std::array<char, core::log::kLineCapacity> refused{};
+            const int length =
+                std::snprintf(refused.data(),
+                              refused.size(),
+                              "ev=activity stage=ambassador_wire result=unmapped bubble=%u "
+                              "ambassador=0x%llX local_slot=%u",
+                              static_cast<unsigned>(bubble),
+                              static_cast<unsigned long long>(key),
+                              static_cast<unsigned>(wire.localSlot));
+            if (length > 0) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::warn,
+                                 {refused.data(), static_cast<std::size_t>(length)});
+            }
+            continue;
+        }
+        wire.ambassadorMask |= std::uint64_t{1} << bubble;
+        wire.ambassadorSlots[bubble] = slot;
+        if (written > 0 && static_cast<std::size_t>(written) < line.size()) {
+            const int added = std::snprintf(line.data() + written,
+                                            line.size() - static_cast<std::size_t>(written),
+                                            "%u:%u,",
+                                            static_cast<unsigned>(bubble),
+                                            static_cast<unsigned>(slot));
+            written = added > 0 ? written + added : written;
+        }
+    }
+    if (wire.ambassadorMask != 0 && written > 0) {
+        const auto length = (std::min)(static_cast<std::size_t>(written), line.size() - 1);
+        core::log::write(
+            core::log::Channel::server, core::log::Level::debug, {line.data(), length});
+    }
+}
+
+/**
  * Adds the host directory a private link owes on top of the mapped fields.
  * The client reads this table to find which host owns a region. One filled row only answers for
  * the region it is in, and a fast travel drops that host before it looks for the target.
@@ -269,6 +339,7 @@ make_wire_snapshot(const Session& session,
     if (private_region(session, region.index)) {
         wire.selfHosted = true;
         wire.selfHostedRegion = region.index;
+        project_ambassadors(mutation, wire);
         membership_message::CitizenAdvertisement host{};
         std::uint64_t hostGeneration = 0;
         server::gameplay::build_private_host_advertisement(

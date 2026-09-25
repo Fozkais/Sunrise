@@ -336,6 +336,27 @@ template <std::size_t Size>
            && remote.processSessionIdHash == hash_string(remote.processSessionId);
 }
 
+/**
+ * Checks every shared private record against the member table this body writes.
+ * A record may only name a member the same body carries, and never the recipient itself: a clear
+ * bit already names the recipient, and the service host is not a player that can simulate.
+ * @param snapshot Snapshot whose shared records are checked.
+ * @return True when every named slot is a present peer.
+ */
+[[nodiscard]] bool valid_ambassadors(const MembershipSnapshot& snapshot) noexcept {
+    for (std::size_t bubble = 0; bubble < snapshot.ambassadorSlots.size(); ++bubble) {
+        if (((snapshot.ambassadorMask >> bubble) & 1U) == 0) {
+            continue;
+        }
+        const std::uint8_t slot = snapshot.ambassadorSlots[bubble];
+        if (slot >= kMemberCount || slot == kServiceHostSlot || slot == snapshot.localSlot
+            || peer_at_slot(snapshot, slot) == nullptr) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 /** Checks the fields that could otherwise encode outside their own wire width. */
@@ -390,7 +411,7 @@ bool valid(const MembershipSnapshot& snapshot) noexcept {
            && snapshot.selfHostedRegion < kRegionIndexBound
            && snapshot.citizenCount <= kCitizenCapacity && placeable_directory(snapshot)
            && valid_remote(snapshot.remoteViewMember) && valid_leg(snapshot.currentLeg)
-           && valid_leg(snapshot.pendingLeg);
+           && valid_leg(snapshot.pendingLeg) && valid_ambassadors(snapshot);
 }
 
 /** Writes the local member, optional remote-view member, and the remaining absent slots. */

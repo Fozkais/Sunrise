@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+
 #include "../member_selection.h"
 #include "member_directory.h"
 
@@ -63,6 +65,9 @@ member_directory(const SessionRecord& record,
     for (std::size_t i = 0; i < roster.peers.size(); ++i) {
         add(roster.peers[i], static_cast<std::uint8_t>(i + 2));
     }
+    std::copy_n(record.bubbleAuthority.ambassadorKeys.begin(),
+                output.bubbleAmbassadors.size(),
+                output.bubbleAmbassadors.begin());
     output.valid = true;
     return output;
 }

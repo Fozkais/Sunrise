@@ -164,6 +164,14 @@ struct MembershipSnapshot final {
      * bubble's state-zero region, so a state above zero has a record the client can match.
      */
     std::int32_t selfHostedRegion{-1};
+    /**
+     * One bit per record whose private bubble another member already simulates. A self-hosted
+     * body names that member's slot there instead of the recipient's own, so only one member of
+     * a shared activity claims the bubble. A clear bit keeps the recipient's own slot.
+     */
+    std::uint64_t ambassadorMask{};
+    /** Ambassador slot of each record whose bit is set in `ambassadorMask`. */
+    std::array<std::uint8_t, 64> ambassadorSlots{};
 };
 
 /** The local member always occupies member slot zero. */

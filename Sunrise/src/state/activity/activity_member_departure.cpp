@@ -2,6 +2,7 @@
 
 #include "../account/account_context.h"
 #include "../runtime/storage/internal.h"
+#include "bubble_authority/ambassadors.h"
 #include "member_departure.h"
 #include "member_mutation.h"
 #include "transactions/internal.h"
@@ -153,6 +154,7 @@ bool depart_member(const SessionBinding& binding,
     if (!memberKey || !accountSoid || accountSoid != account_primary_soid(bound_account())) {
         return false;
     }
+    bubble_authority::AmbassadorChanges ambassadors{};
     AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
     auto& state = runtime::storage::g_state.activity;
     const auto target = transactions::find_session(state, binding.sessionId);
@@ -194,9 +196,12 @@ bool depart_member(const SessionBinding& binding,
                 }
             }
             record.recordRevision = ++state.stateRevision;
+            // A departed ambassador hands its bubbles to whoever is still there.
+            bubble_authority::refresh_shared_ambassadors(state, record, ambassadors);
         }
     }
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+    bubble_authority::report_ambassador_changes(binding.sessionId, ambassadors);
     return changed;
 }
 } // namespace sunrise::state::activity

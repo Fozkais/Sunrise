@@ -11,9 +11,11 @@
 #include <string_view>
 
 #include "../../../../../core/logging/log.h"
+#include "../../../../../core/settings/settings.h"
 #include "../../../../../middleware/bap/activity_message/activity_host_control.h"
 #include "../../../../../middleware/bap/activity_message/sensor_auth_update.h"
 #include "../../../../../middleware/secure_channel/runtime.h"
+#include "../../../../../state/activity/bubble_authority/ambassadors.h"
 #include "../../../../../state/activity/bubble_authority/runtime.h"
 #include "../../../../../state/activity/membership/activity_membership_query.h"
 #include "../../../../../state/activity/runtime.h"
@@ -65,6 +67,32 @@ host_output_status(RosterOutcome outcome) noexcept {
         }
     }
     return false;
+}
+
+/**
+ * Reports one bubble grant held back because another member simulates the bubble.
+ * @param session Link whose body goes out without the grant.
+ * @param region Region the grant would have named.
+ */
+void report_grant_withheld(const Session& session, std::int32_t region) noexcept {
+    const auto bubble = static_cast<std::uint8_t>(
+        region >> state::activity::bubble_authority::kSliceSetToBubbleShift);
+    std::uint64_t ambassador = 0;
+    static_cast<void>(state::activity::bubble_authority::bubble_ambassador(
+        session.activity.session.sessionId, bubble, ambassador));
+    std::array<char, core::log::kLineCapacity> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=activity stage=grant result=withheld reason=ambassador "
+                                      "bubble=%u key=0x%llX ambassador=0x%llX",
+                                      static_cast<unsigned>(bubble),
+                                      static_cast<unsigned long long>(session.activityMemberKey),
+                                      static_cast<unsigned long long>(ambassador));
+    if (written > 0) {
+        core::log::write(core::log::Channel::server,
+                         core::log::Level::debug,
+                         {line.data(), static_cast<std::size_t>(written)});
+    }
 }
 
 } // namespace
@@ -298,15 +326,26 @@ bool append_roster_notification(
         enteringBubble
             ? static_cast<std::int32_t>(snapshot.region)
             : (pendingRegion >= 0 ? pendingRegion : static_cast<std::int32_t>(snapshot.region));
+    // In a shared activity a private bubble's authority belongs to its ambassador's link alone.
+    const bool ambassadorGrant =
+        core::settings::get().server.activation.singlePrivateAmbassador
+        && session.activity.role == ActivityClientRole::privateCurrent
+        && private_region(session, grantRegion);
+    bool grantWithheld = false;
     if (!peerLeave && !placedRetirementPending
         && state::activity::bubble_authority::select_grant(
             session.activity.session.sessionId,
             grantRegion,
             grant,
-            enteringBubble || client_region_ready(session, refresh))) {
+            enteringBubble || client_region_ready(session, refresh),
+            ambassadorGrant ? session.activityMemberKey : 0,
+            &grantWithheld)) {
         snapshot.hasGrant = true;
         snapshot.grant.bubble = grant.bubble;
         snapshot.grant.token = grant.token;
+    }
+    if (grantWithheld) {
+        report_grant_withheld(session, grantRegion);
     }
 
     const std::size_t initialWritten = written;

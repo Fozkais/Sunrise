@@ -61,12 +61,16 @@ constexpr std::uint64_t kDescriptorCount = 128;
         (snapshot.localSlot == kReservedAmbassadorSlot ? std::uint64_t{0}
                                                        : std::uint64_t{kReservedAmbassadorSlot})
         + kSignedFieldBias;
-    // An advertised record names the admitted ambassador. A self-hosted body names the client's
-    // own slot on every record, which makes it claim each region. Every other record names the
-    // reserved slot, which leaves an existing claim alone.
+    // An advertised record names the admitted ambassador. A self-hosted body names the member
+    // that simulates a private bubble another member already holds, and the client's own slot on
+    // every other record, which makes it claim each region it enters. Every other record names
+    // the reserved slot, which leaves an existing claim alone.
+    const bool sharedHere = ((snapshot.ambassadorMask >> bubble) & 1U) != 0;
+    const std::uint64_t selfHostedSlot =
+        sharedHere ? snapshot.ambassadorSlots[bubble] : snapshot.localSlot;
     const std::uint64_t ambassadorSlot =
         citizen != nullptr ? static_cast<std::uint64_t>(citizen->ambassadorSlot) + kSignedFieldBias
-        : snapshot.selfHosted ? static_cast<std::uint64_t>(snapshot.localSlot) + kSignedFieldBias
+        : snapshot.selfHosted ? selfHostedSlot + kSignedFieldBias
                               : unadvertisedSlot;
     const bool isPublic = ((snapshot.regionPublicMask >> bubble) & 1U) != 0;
     bool encoded = writer.write(kRegionIndexBias + region, 32)
