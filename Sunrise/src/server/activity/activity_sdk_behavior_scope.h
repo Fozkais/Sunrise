@@ -13,10 +13,16 @@ namespace sunrise::server::activity::behavior_scope {
 
 namespace format = state::activity_sdk::format;
 
-/** Occurrence ranks: the live region's state wins over the seed state. */
+/**
+ * Occurrence ranks: the live region's state wins over a sibling state of its bubble, which wins
+ * over the seed state. A sibling state's content (a cutscene state's cinematic) is reachable
+ * from the state the player stands in: the bubble is loaded either way, and selecting the
+ * cutscene state instead leaves the landing state's static objects unbound on the client.
+ */
 inline constexpr unsigned kRankNone = 0;
 inline constexpr unsigned kRankSeedState = 1;
-inline constexpr unsigned kRankLiveState = 2;
+inline constexpr unsigned kRankSiblingState = 2;
+inline constexpr unsigned kRankLiveState = 3;
 
 /** @return True when the state row is the one the client's region packs. */
 [[nodiscard]] inline bool live_state(std::span<const format::State> states,
@@ -35,6 +41,27 @@ inline constexpr unsigned kRankLiveState = 2;
     }
     return static_cast<std::uint64_t>(state.sliceSetIndex) + state.stateOrdinal
            == static_cast<std::uint32_t>(region);
+}
+
+/** @return True when the state row is another state of the bubble the client's region packs. */
+[[nodiscard]] inline bool sibling_state(std::span<const format::State> states,
+                                        std::span<const format::Bubble> bubbles,
+                                        std::uint32_t scenario,
+                                        std::uint32_t row,
+                                        std::int32_t region) noexcept {
+    constexpr std::uint32_t kFactor = middleware::content::packages::tables::kSliceSetIndexFactor;
+    if (region < 0 || row >= states.size()) {
+        return false;
+    }
+    const format::State& state = states[row];
+    if (state.scenarioIndex != scenario || state.bubbleIndex >= bubbles.size()
+        || bubbles[state.bubbleIndex].scenarioIndex != scenario
+        || state.stateOrdinal >= kFactor) {
+        return false;
+    }
+    return state.sliceSetIndex == static_cast<std::uint32_t>(region) / kFactor * kFactor
+           && static_cast<std::uint64_t>(state.sliceSetIndex) + state.stateOrdinal
+                  != static_cast<std::uint32_t>(region);
 }
 
 struct Selection final {
@@ -64,10 +91,12 @@ struct Selection final {
             || occurrence.bubbleIndex != states[occurrence.stateIndex].bubbleIndex) {
             continue;
         }
-        const unsigned rank = live_state(states, bubbles, scenario, occurrence.stateIndex, region)
-                                  ? kRankLiveState
-                              : occurrence.stateIndex == seedState ? kRankSeedState
-                                                                   : kRankNone;
+        const unsigned rank =
+            live_state(states, bubbles, scenario, occurrence.stateIndex, region) ? kRankLiveState
+            : sibling_state(states, bubbles, scenario, occurrence.stateIndex, region)
+                ? kRankSiblingState
+            : occurrence.stateIndex == seedState ? kRankSeedState
+                                                 : kRankNone;
         if (rank == kRankNone || rank < best) {
             continue;
         }

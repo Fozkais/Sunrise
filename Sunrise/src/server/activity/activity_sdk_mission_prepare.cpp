@@ -138,12 +138,18 @@ namespace {
     if (!lease.configured || lease.revision == 0 || lease.plan.scenarioRow != view.scenarioRow) {
         return SceneStatus::missionSeedUnavailable;
     }
+    // A sibling state of the live bubble counts as well: its objects are loaded with the bubble.
     if (lease.plan.stateRow != stateRow
         && !behavior_scope::live_state(view.catalog->states(),
                                        view.catalog->bubbles(),
                                        view.scenarioRow,
                                        stateRow,
-                                       link.effectiveRegion)) {
+                                       link.effectiveRegion)
+        && !behavior_scope::sibling_state(view.catalog->states(),
+                                          view.catalog->bubbles(),
+                                          view.scenarioRow,
+                                          stateRow,
+                                          link.effectiveRegion)) {
         return SceneStatus::wrongState;
     }
     if (lease.publicationPending || lease.publishedRevision != lease.revision) {
