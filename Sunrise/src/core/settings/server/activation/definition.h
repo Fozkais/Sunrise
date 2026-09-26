@@ -54,11 +54,11 @@ struct Settings {
     bool claimReleasedEntities{true};
     /**
      * Entities a client abandons (activity message 26) are purged on that client, the way it asks
-     * for a purge itself, instead of joining the claim its next grant hands back. A client that
-     * abandoned an entity has torn it down; handed it back, the client keeps a slot with nothing in
-     * it and never builds that object again, such as the spawn point a squad's rule sends it to.
+     * for a purge itself. Off, an abandon is only logged: the client tore that entity down leaving
+     * a state and builds it again on its own, which neither a claim nor a purge lets it do. The
+     * hall's first boss spawns from such an object, destroyed as the boarding cinematic ends.
      */
-    bool purgeAbandonedEntities{true};
+    bool purgeAbandonedEntities{false};
 };
 
 } // namespace sunrise::core::settings::server::activation

@@ -60,7 +60,7 @@
       "peer_region_facts": true,
       "unfiltered_shared_dialogue": true,
       "claim_released_entities": true,
-      "purge_abandoned_entities": true
+      "purge_abandoned_entities": false
     }
   },
   "state": {

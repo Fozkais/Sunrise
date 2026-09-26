@@ -542,13 +542,13 @@ bool process(const ActivityClientBinding& binding,
         return prepare_authority_reset_acknowledgement(
             binding, rosterDecode, adapter, request, plan, hasTransaction);
     case IngressAdapter::authorityAbandon:
-        // An abandoned entity is gone on the client, so it is purged rather than handed back.
+        // An abandoned entity is gone on the client, which builds it again itself. Claimed back or
+        // purged, it never was: the hall's first boss lost the object his spawn point names.
         if (core::settings::get().server.activation.purgeAbandonedEntities) {
             return prepare_authority_purge(
                 binding, rosterDecode, adapter, request, plan, hasTransaction);
         }
-        return prepare_authority_abdication(
-            binding, rosterDecode, adapter, request, plan, hasTransaction);
+        return frame_only(binding, rosterDecode, adapter, request);
     case IngressAdapter::authorityAbdicate:
         return prepare_authority_abdication(
             binding, rosterDecode, adapter, request, plan, hasTransaction);
