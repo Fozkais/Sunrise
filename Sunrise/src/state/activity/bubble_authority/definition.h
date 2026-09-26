@@ -24,6 +24,11 @@ inline constexpr std::uint16_t kInitialGrantToken = 1;
 inline constexpr std::uint16_t kMaximumGrantToken = 0xFFFF;
 /** The cleared grant slot uses a value outside the 65-entry authority table. */
 inline constexpr std::uint8_t kInvalidBubble = 0xFF;
+/**
+ * How long a bubble just given up stays ungranted unless the client arrives in it. The client's
+ * region report follows its abdication by a few tens of milliseconds; two seconds covers it.
+ */
+inline constexpr std::uint64_t kReleaseSettleMs = 2000;
 
 /** One changed per-bubble token picked under the State lock. */
 struct Grant final {
@@ -53,6 +58,8 @@ struct AuthorityState final {
     std::array<std::uint64_t, kAuthoritySlotCount> ambassadorKeys{};
     /** Member key of the member whose link received each bubble's grant in force, or zero. */
     std::array<std::uint64_t, kAuthoritySlotCount> grantHolderKeys{};
+    /** Tick of each bubble's last abdication, zero when it was never given up. */
+    std::array<std::uint64_t, kAuthoritySlotCount> releasedTicks{};
 };
 
 } // namespace sunrise::state::activity::bubble_authority

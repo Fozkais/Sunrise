@@ -10,12 +10,15 @@ namespace sunrise::state::activity::bubble_authority {
  * Renews released authority only when the client enters that bubble again.
  * A named requester in a shared activity is granted a bubble only while it is that bubble's
  * ambassador, and an ambassador whose bubble is held by another member's grant is granted it anew.
+ * A bubble the client gave up in the last `kReleaseSettleMs` is granted again only when the
+ * client arrives in it.
  * @param sessionId Joined activity session.
  * @param sliceSetIndex Slice set the client is in, or the destination's own.
  * @param grant Gets the bubble, its token and the requester as its holder.
- * @param enteringBubble Whether this snapshot enters a different held bubble.
+ * @param enteringBubble Whether a bubble given up may be granted again now.
  * @param requesterKey Member key of the link asking, or zero to grant as a lone client would.
  * @param withheld Optional; set when the bubble is owed to another member's link.
+ * @param arriving Whether this snapshot is the one that enters the bubble.
  * @return True when a bubble is owed.
  */
 [[nodiscard]] bool select_grant(std::uint64_t sessionId,
@@ -23,7 +26,8 @@ namespace sunrise::state::activity::bubble_authority {
                                 Grant& grant,
                                 bool enteringBubble = false,
                                 std::uint64_t requesterKey = 0,
-                                bool* withheld = nullptr) noexcept;
+                                bool* withheld = nullptr,
+                                bool arriving = false) noexcept;
 
 /**
  * Records a bubble as granted so it is not granted twice.

@@ -355,15 +355,22 @@ bool append_roster_notification(
             snapshot.grant.token = grant.token;
         }
     }
+    // A bubble the client gave up is granted again only once it stands there. A client leaving a
+    // bubble releases that bubble's entities and reports the bubble behind it as its pending leg;
+    // granting it back from outside left those entities with no client to take them up, so they
+    // stood still and respawned when the player walked back in. A bubble never granted is still
+    // granted ahead, before the slice-set switch.
+    const bool grantHeld = heldRegion >= 0 && bubble_of(grantRegion) == bubble_of(heldRegion);
     bool grantWithheld = false;
     if (!snapshot.hasGrant && !peerLeave && !placedRetirementPending
         && state::activity::bubble_authority::select_grant(
             session.activity.session.sessionId,
             grantRegion,
             grant,
-            enteringBubble || client_region_ready(session, refresh),
+            enteringBubble || (grantHeld && client_region_ready(session, refresh)),
             requester(grantRegion),
-            &grantWithheld)) {
+            &grantWithheld,
+            enteringBubble)) {
         snapshot.hasGrant = true;
         snapshot.grant.bubble = grant.bubble;
         snapshot.grant.token = grant.token;

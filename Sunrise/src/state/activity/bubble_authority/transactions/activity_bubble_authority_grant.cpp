@@ -12,8 +12,10 @@ bool select_grant(std::uint64_t sessionId,
                   Grant& grant,
                   bool enteringBubble,
                   std::uint64_t requesterKey,
-                  bool* withheld) noexcept {
+                  bool* withheld,
+                  bool arriving) noexcept {
     grant = {};
+    const std::uint64_t now = GetTickCount64();
     if (withheld != nullptr) {
         *withheld = false;
     }
@@ -37,11 +39,18 @@ bool select_grant(std::uint64_t sessionId,
             requesterKey != 0 && ambassador != 0 && ambassador != requesterKey;
         const bool takesOver = requesterKey != 0 && ambassador == requesterKey && holder != 0
                                 && holder != requesterKey;
+        // A client gives a bubble up as it walks out, a moment before its region report says
+        // it left. Handed back in that moment, the bubble would be held again from outside and
+        // the entities the client released there would find no client to take them up.
+        const std::uint64_t released = authority.releasedTicks[bubble];
+        const bool settled = released == 0 || now - released >= kReleaseSettleMs;
         if (otherAmbassador) {
             if (withheld != nullptr) {
                 *withheld = true;
             }
-        } else if (previous == 0 || (enteringBubble && !authority.held[bubble]) || takesOver) {
+        } else if (previous == 0
+                   || (enteringBubble && !authority.held[bubble] && (arriving || settled))
+                   || takesOver) {
             // A bubble handed back and re-entered must be granted a token the client's mirror
             // has not already seen, so the next one follows the highest ever issued.
             const std::uint16_t issued = authority.issuedTokens[bubble];
@@ -91,6 +100,7 @@ void record_abdication(std::uint64_t sessionId,
     if (target != kInvalidSessionSlot) {
         AuthorityState& authority = state.sessions[target].bubbleAuthority;
         authority.held[bubble] = false;
+        authority.releasedTicks[bubble] = GetTickCount64();
         if (mask != nullptr) {
             auto& released = authority.releasedEntities[bubble];
             for (std::size_t index = 0; index < released.size(); ++index) {
