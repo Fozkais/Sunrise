@@ -337,12 +337,19 @@ bool append_roster_notification(
     const auto bubble_of = [](std::int32_t region) noexcept {
         return region >> state::activity::bubble_authority::kSliceSetToBubbleShift;
     };
-    // A client that walks back into a bubble whose authority it gave up simulates nothing there:
-    // its enemies stand still and respawn. Once it has arrived, its pending leg names the region
-    // behind it, so the bubble it stands in is asked for first and the one ahead after it.
-    const auto heldRegion = static_cast<std::int32_t>(snapshot.region);
-    if (!peerLeave && !placedRetirementPending && !enteringBubble && heldRegion >= 0
-        && grantRegion >= 0 && bubble_of(heldRegion) != bubble_of(grantRegion)) {
+    // A client leaving a bubble gives it up and releases its entities, then reports the bubble
+    // behind it as its pending leg, which the roster's own region follows. Granting from either
+    // handed a bubble back to a client standing outside it, and the entities it had released
+    // found no client to take them up: they stood still and respawned, and the bubble's vehicles
+    // and objects stopped answering. The bubble the client holds comes from its current leg.
+    const state::activity::membership::ClientPlacement placement =
+        state::activity::membership::reported_placement(session.activity.session.sessionId);
+    const std::int32_t heldRegion = placement.currentRegion >= 0
+                                        ? placement.currentRegion
+                                        : static_cast<std::int32_t>(snapshot.region);
+    // The bubble the client stands in: granted when it was never granted, or granted again once
+    // a bubble given up has settled with the client still there.
+    if (!peerLeave && !placedRetirementPending && heldRegion >= 0) {
         bool heldWithheld = false;
         if (state::activity::bubble_authority::select_grant(session.activity.session.sessionId,
                                                             heldRegion,
@@ -355,22 +362,17 @@ bool append_roster_notification(
             snapshot.grant.token = grant.token;
         }
     }
-    // A bubble the client gave up is granted again only once it stands there. A client leaving a
-    // bubble releases that bubble's entities and reports the bubble behind it as its pending leg;
-    // granting it back from outside left those entities with no client to take them up, so they
-    // stood still and respawned when the player walked back in. A bubble never granted is still
-    // granted ahead, before the slice-set switch.
-    const bool grantHeld = heldRegion >= 0 && bubble_of(grantRegion) == bubble_of(heldRegion);
+    // The bubble ahead: granted before the slice-set switch only when it was never granted. A
+    // bubble given up is granted again only from the client's current leg, once it stands there.
     bool grantWithheld = false;
-    if (!snapshot.hasGrant && !peerLeave && !placedRetirementPending
-        && state::activity::bubble_authority::select_grant(
-            session.activity.session.sessionId,
-            grantRegion,
-            grant,
-            enteringBubble || (grantHeld && client_region_ready(session, refresh)),
-            requester(grantRegion),
-            &grantWithheld,
-            enteringBubble)) {
+    if (!snapshot.hasGrant && !peerLeave && !placedRetirementPending && grantRegion >= 0
+        && (heldRegion < 0 || bubble_of(grantRegion) != bubble_of(heldRegion))
+        && state::activity::bubble_authority::select_grant(session.activity.session.sessionId,
+                                                           grantRegion,
+                                                           grant,
+                                                           false,
+                                                           requester(grantRegion),
+                                                           &grantWithheld)) {
         snapshot.hasGrant = true;
         snapshot.grant.bubble = grant.bubble;
         snapshot.grant.token = grant.token;
