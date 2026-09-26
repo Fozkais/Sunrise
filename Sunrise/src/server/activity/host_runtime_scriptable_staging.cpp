@@ -508,6 +508,31 @@ bool next_dialogue_pulse(const state::activity::SessionBinding& binding,
     return found;
 }
 
+/** Reads the newest delivered dialogue line one link has already heard. */
+bool heard_dialogue_pulse(const state::activity::SessionBinding& binding,
+                          std::uint64_t heardSerial,
+                          std::uint64_t listenerGeneration,
+                          PendingScriptableOverride& output) noexcept {
+    output = {};
+    bool found = false;
+    AcquireSRWLockShared(&g_lock);
+    const Instance* const instance = find_instance(binding);
+    if (instance != nullptr && instance->view.active) {
+        for (auto pulse = instance->dialoguePulses.rbegin();
+             pulse != instance->dialoguePulses.rend();
+             ++pulse) {
+            if (pulse->estateSerial <= heardSerial
+                || pulse->expectedActivityClientGeneration == listenerGeneration) {
+                output = *pulse;
+                found = true;
+                break;
+            }
+        }
+    }
+    ReleaseSRWLockShared(&g_lock);
+    return found;
+}
+
 /** Reports whether any line delivered past a serial waits for its filter volume. */
 bool dialogue_filtered_after(const state::activity::SessionBinding& binding,
                              std::uint64_t afterSerial) noexcept {

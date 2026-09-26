@@ -951,6 +951,20 @@ pending_scriptable_tail(const state::activity::SessionBinding& binding,
                                        std::uint64_t listenerGeneration,
                                        PendingScriptableOverride& output) noexcept;
 
+/**
+ * Reads the newest delivered dialogue line one link has already heard.
+ * A body without the dialogue sensor puts the sensor back to its defaults on the client, and a
+ * line that arrives and is cleared within one client frame never plays. Every later body carries
+ * the line heard last instead; its fire sequence is already played, so it does not play again.
+ * @param heardSerial The link's cursor; lines retained up to it were heard.
+ * @param listenerGeneration The link's own generation; the lines it delivered were heard live.
+ * @return False when the link has heard no line the log still holds.
+ */
+[[nodiscard]] bool heard_dialogue_pulse(const state::activity::SessionBinding& binding,
+                                        std::uint64_t heardSerial,
+                                        std::uint64_t listenerGeneration,
+                                        PendingScriptableOverride& output) noexcept;
+
 /** @return True when a dialogue line delivered past afterSerial waits for a filter volume. */
 [[nodiscard]] bool dialogue_filtered_after(const state::activity::SessionBinding& binding,
                                            std::uint64_t afterSerial) noexcept;

@@ -433,12 +433,24 @@ build_roster_snapshot(Session& session,
     // line per body because one msg 5 holds one body per sensor, in the order they played. A
     // member absent at that moment was moved past the line and never gets it. A line this region
     // cannot place is passed over, so it can neither stall the next ones nor refuse the roster.
+    // A body without the sensor clears it on the client, and a line cleared in the frame it
+    // arrived in never plays: with no new line, the one this link heard last rides along again.
     server::activity::host::PendingScriptableOverride pulse{};
-    if (server::activity::host::next_dialogue_pulse(session.activity.session,
+    const bool freshPulse =
+        server::activity::host::next_dialogue_pulse(session.activity.session,
                                                     session.activityDialogueSerial,
                                                     session.activity.bindingGeneration,
-                                                    pulse)) {
-        session.activityDialogueSerialBuilt = pulse.estateSerial;
+                                                    pulse);
+    const bool carriedPulse =
+        !freshPulse
+        && server::activity::host::heard_dialogue_pulse(session.activity.session,
+                                                        session.activityDialogueSerial,
+                                                        session.activity.bindingGeneration,
+                                                        pulse);
+    if (freshPulse || carriedPulse) {
+        if (freshPulse) {
+            session.activityDialogueSerialBuilt = pulse.estateSerial;
+        }
         const server::activity::host::ScriptableTarget& target = pulse.target;
         // The same group admission the estate uses: an SDK-generated sensor lives in a
         // state-local group this body may first have to activate or append.
@@ -487,8 +499,9 @@ build_roster_snapshot(Session& session,
                                       target.stateLocalRoster)) {
             failure = "install";
         }
+        // A carried line this region no longer places is simply left out.
         std::array<char, core::log::kLineCapacity> line{};
-        const int written = std::snprintf(
+        const int written = !freshPulse ? 0 : std::snprintf(
             line.data(),
             line.size(),
             "ev=activity stage=dialogue_replay result=%s reason=%.*s serial=%llu cue=%u "
