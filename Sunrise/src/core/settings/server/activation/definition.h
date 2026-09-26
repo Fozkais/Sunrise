@@ -52,6 +52,13 @@ struct Settings {
      * those entities stay without an authoritative client until the activity restarts.
      */
     bool claimReleasedEntities{true};
+    /**
+     * Entities a client abandons (activity message 26) are purged on that client, the way it asks
+     * for a purge itself, instead of joining the claim its next grant hands back. A client that
+     * abandoned an entity has torn it down; handed it back, the client keeps a slot with nothing in
+     * it and never builds that object again, such as the spawn point a squad's rule sends it to.
+     */
+    bool purgeAbandonedEntities{true};
 };
 
 } // namespace sunrise::core::settings::server::activation

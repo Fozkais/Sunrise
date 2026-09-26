@@ -58,6 +58,11 @@ bool Parser::activation_settings(server::activation::Settings& output) noexcept 
                 return false;
             }
             candidate.claimReleasedEntities = value;
+        } else if (key == "purge_abandoned_entities") {
+            if (!boolean(value)) {
+                return false;
+            }
+            candidate.purgeAbandonedEntities = value;
         } else if (!skip_value(0)) {
             return false;
         }

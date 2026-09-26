@@ -542,6 +542,13 @@ bool process(const ActivityClientBinding& binding,
         return prepare_authority_reset_acknowledgement(
             binding, rosterDecode, adapter, request, plan, hasTransaction);
     case IngressAdapter::authorityAbandon:
+        // An abandoned entity is gone on the client, so it is purged rather than handed back.
+        if (core::settings::get().server.activation.purgeAbandonedEntities) {
+            return prepare_authority_purge(
+                binding, rosterDecode, adapter, request, plan, hasTransaction);
+        }
+        return prepare_authority_abdication(
+            binding, rosterDecode, adapter, request, plan, hasTransaction);
     case IngressAdapter::authorityAbdicate:
         return prepare_authority_abdication(
             binding, rosterDecode, adapter, request, plan, hasTransaction);

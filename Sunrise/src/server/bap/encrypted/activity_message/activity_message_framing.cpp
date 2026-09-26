@@ -336,7 +336,10 @@ bool prepare_peer_leave(const ActivityClientBinding& binding,
     return true;
 }
 
-/** A purge answer preserves the requesting client's complete mask and reason. */
+/**
+ * A purge answer preserves the requesting client's complete mask and reason. An abandon (msg 26)
+ * is answered the same way: the client tore those entities down.
+ */
 bool prepare_authority_purge(const ActivityClientBinding& binding,
                              const RosterDecodeMap& rosterDecode,
                              IngressAdapter adapter,
@@ -344,7 +347,15 @@ bool prepare_authority_purge(const ActivityClientBinding& binding,
                              ActivityPlan& plan,
                              bool& hasTransaction) noexcept {
     service::entity_authority::PurgeRequest purge{};
-    const bool parsed = service::entity_authority::parse_request_purge(request.payload, purge);
+    bool parsed = false;
+    if (adapter == IngressAdapter::authorityAbandon) {
+        service::entity_authority::Release abandon{};
+        parsed = service::entity_authority::parse_abandon(request.payload, abandon);
+        purge.mask = abandon.mask;
+        purge.reason = abandon.reason;
+    } else {
+        parsed = service::entity_authority::parse_request_purge(request.payload, purge);
+    }
     if (!frame_only(binding, rosterDecode, adapter, request)) {
         return false;
     }
