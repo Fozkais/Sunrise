@@ -41,9 +41,9 @@ struct Settings {
      */
     bool peerRegionFacts{true};
     /**
-     * A dialogue line sent while several members share the activity plays at once for every
-     * member, with its authored filter volume dropped. A filtered line otherwise plays only for a
-     * member already in its volume. Off, every line keeps its filter.
+     * Every scripted dialogue line plays at once for every member, with its authored filter
+     * volume dropped. A filtered line otherwise plays only for a client already in its volume
+     * when the line arrives, alone or not. Off, every line keeps its filter.
      */
     bool unfilteredSharedDialogue{true};
 };

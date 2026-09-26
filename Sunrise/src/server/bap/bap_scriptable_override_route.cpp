@@ -526,28 +526,25 @@ bool request_activity_state_local_dialogue_override(
     const activity::host::ScriptableOutputReservation* reservation,
     middleware::bap::activity_message::scriptable_auth::Type2LaneClientRef filter) noexcept {
     const std::lock_guard lock(session_lock());
-    // A filtered line waits on each client until its own player enters the volume, and a member
-    // who reaches it late never hears it. With several members the line plays for everyone at
-    // once instead, since whoever set it off has moved the whole party on.
+    // A filtered line waits on the client until its player enters the volume, and a client not
+    // already inside when the line arrives never plays it, alone or not. The line plays at once
+    // for everyone instead, since whoever set it off has moved the whole party on.
     if (filter.slotIndex >= 0
         && core::settings::get().server.activation.unfilteredSharedDialogue) {
-        const std::size_t members = private_member_links_locked(binding);
-        if (members > 1) {
-            std::array<char, core::log::kLineCapacity> line{};
-            const int written = std::snprintf(line.data(),
-                                              line.size(),
-                                              "ev=activity stage=dialogue_filter result=dropped "
-                                              "cue=%u members=%zu filter_key=0x%08X",
-                                              static_cast<unsigned>(cueIndex),
-                                              members,
-                                              static_cast<unsigned>(filter.registryKey));
-            if (written > 0) {
-                core::log::write(core::log::Channel::server,
-                                 core::log::Level::info,
-                                 {line.data(), static_cast<std::size_t>(written)});
-            }
-            filter = {};
+        std::array<char, core::log::kLineCapacity> line{};
+        const int written = std::snprintf(line.data(),
+                                          line.size(),
+                                          "ev=activity stage=dialogue_filter result=dropped "
+                                          "cue=%u members=%zu filter_key=0x%08X",
+                                          static_cast<unsigned>(cueIndex),
+                                          private_member_links_locked(binding),
+                                          static_cast<unsigned>(filter.registryKey));
+        if (written > 0) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::info,
+                             {line.data(), static_cast<std::size_t>(written)});
         }
+        filter = {};
     }
     std::size_t linkCount = 0;
     const Session* const session =
