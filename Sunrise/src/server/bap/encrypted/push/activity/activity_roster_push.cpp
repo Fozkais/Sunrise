@@ -327,18 +327,42 @@ bool append_roster_notification(
             ? static_cast<std::int32_t>(snapshot.region)
             : (pendingRegion >= 0 ? pendingRegion : static_cast<std::int32_t>(snapshot.region));
     // In a shared activity a private bubble's authority belongs to its ambassador's link alone.
-    const bool ambassadorGrant =
-        core::settings::get().server.activation.singlePrivateAmbassador
-        && session.activity.role == ActivityClientRole::privateCurrent
-        && private_region(session, grantRegion);
+    const auto requester = [&session](std::int32_t region) noexcept -> std::uint64_t {
+        return core::settings::get().server.activation.singlePrivateAmbassador
+                       && session.activity.role == ActivityClientRole::privateCurrent
+                       && private_region(session, region)
+                   ? session.activityMemberKey
+                   : 0;
+    };
+    const auto bubble_of = [](std::int32_t region) noexcept {
+        return region >> state::activity::bubble_authority::kSliceSetToBubbleShift;
+    };
+    // A client that walks back into a bubble whose authority it gave up simulates nothing there:
+    // its enemies stand still and respawn. Once it has arrived, its pending leg names the region
+    // behind it, so the bubble it stands in is asked for first and the one ahead after it.
+    const auto heldRegion = static_cast<std::int32_t>(snapshot.region);
+    if (!peerLeave && !placedRetirementPending && !enteringBubble && heldRegion >= 0
+        && grantRegion >= 0 && bubble_of(heldRegion) != bubble_of(grantRegion)) {
+        bool heldWithheld = false;
+        if (state::activity::bubble_authority::select_grant(session.activity.session.sessionId,
+                                                            heldRegion,
+                                                            grant,
+                                                            client_region_ready(session, refresh),
+                                                            requester(heldRegion),
+                                                            &heldWithheld)) {
+            snapshot.hasGrant = true;
+            snapshot.grant.bubble = grant.bubble;
+            snapshot.grant.token = grant.token;
+        }
+    }
     bool grantWithheld = false;
-    if (!peerLeave && !placedRetirementPending
+    if (!snapshot.hasGrant && !peerLeave && !placedRetirementPending
         && state::activity::bubble_authority::select_grant(
             session.activity.session.sessionId,
             grantRegion,
             grant,
             enteringBubble || client_region_ready(session, refresh),
-            ambassadorGrant ? session.activityMemberKey : 0,
+            requester(grantRegion),
             &grantWithheld)) {
         snapshot.hasGrant = true;
         snapshot.grant.bubble = grant.bubble;
@@ -346,29 +370,6 @@ bool append_roster_notification(
     }
     if (grantWithheld) {
         report_grant_withheld(session, grantRegion);
-    }
-    // Once a client has arrived, its pending leg names the region behind it, so an ambassador that
-    // walked into a bubble another member was granted before would never ask for it. It asks for
-    // the bubble it stands in whenever the one ahead is not owed to it.
-    const auto heldRegion = static_cast<std::int32_t>(snapshot.region);
-    if (!snapshot.hasGrant && !peerLeave && !placedRetirementPending
-        && core::settings::get().server.activation.singlePrivateAmbassador
-        && session.activity.role == ActivityClientRole::privateCurrent && heldRegion >= 0
-        && grantRegion >= 0
-        && (heldRegion >> state::activity::bubble_authority::kSliceSetToBubbleShift)
-               != (grantRegion >> state::activity::bubble_authority::kSliceSetToBubbleShift)
-        && private_region(session, heldRegion)) {
-        bool heldWithheld = false;
-        if (state::activity::bubble_authority::select_grant(session.activity.session.sessionId,
-                                                            heldRegion,
-                                                            grant,
-                                                            client_region_ready(session, refresh),
-                                                            session.activityMemberKey,
-                                                            &heldWithheld)) {
-            snapshot.hasGrant = true;
-            snapshot.grant.bubble = grant.bubble;
-            snapshot.grant.token = grant.token;
-        }
     }
 
     const std::size_t initialWritten = written;
