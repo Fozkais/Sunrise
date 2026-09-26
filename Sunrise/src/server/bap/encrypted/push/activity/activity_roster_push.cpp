@@ -3,6 +3,7 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <bit>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -420,6 +421,21 @@ bool append_roster_notification(
     if (placedRetirementPending && allowEntityRetirement && !hasRetirement && !solicited) {
         encoded = false;
     }
+    // The bubble the client stands in, granted to it, takes back the entities given up there.
+    // Nothing else hands them to a client: without this they stand still and respawn, and the
+    // bubble's vehicles, altars and mines stop answering. A claim spends a replication epoch the
+    // way a purge does, so it waits for the same keepalive that may advance the shared sequence.
+    namespace control = middleware::bap::activity_message::host_control;
+    control::ClaimAuthorityBody claim{};
+    const bool hasClaim =
+        encoded && !hasRetirement && snapshot.hasGrant && heldRegion >= 0
+        && grant.bubble == bubble_of(heldRegion)
+        && core::settings::get().server.activation.claimReleasedEntities
+        && state::activity::bubble_authority::snapshot_released_entities(
+            session.activity.session.sessionId, grant.bubble, claim.slots);
+    if (hasClaim && (!allowEntityRetirement || !epochCurrent)) {
+        encoded = false;
+    }
     // An unsolicited body identical to the last delivered one is skipped. A solicited one never
     // is. The repeat check knows only this host's own history, and a slice-set teardown clears
     // the client's mirror without telling us, which is exactly when it asks again.
@@ -461,7 +477,6 @@ bool append_roster_notification(
         return false;
     }
     if (encoded && hasRetirement) {
-        namespace control = middleware::bap::activity_message::host_control;
         const control::PurgeAuthorityBody retirement{
             .slots = entityRetirement.entities, .epoch = retirementEpoch, .reason = 0};
         std::array<std::byte, control::kPurgeAuthorityByteCount> retirementBytes{};
@@ -495,6 +510,23 @@ bool append_roster_notification(
         encoded
         && build_roster_decode_map(snapshot.roster, session.activity.bindingGeneration, decodeMap);
     encoded = encoded && stage_roster_device_publications(session, scratch, snapshot);
+    // The claim follows the body that grants its bubble. The roster's nonce is spent here, and the
+    // advance below spends the claim's.
+    if (encoded && hasClaim) {
+        middleware::secure_channel::advance_nonce(nonce);
+        claim.epoch = retirementEpoch;
+        std::array<std::byte, control::kClaimAuthorityByteCount> claimBytes{};
+        std::size_t claimSize{};
+        encoded = control::encode_claim_authority(claim, claimBytes, claimSize)
+                  && append_notification_frame(scratch,
+                                               session.activity.session.sessionId,
+                                               control::kClaimAuthorityMessageType,
+                                               std::span(claimBytes).first(claimSize),
+                                               key,
+                                               nonce,
+                                               response,
+                                               written);
+    }
     if (encoded) {
         middleware::secure_channel::advance_nonce(nonce);
         // The deferred answer is discharged by the body that carries it.
@@ -508,6 +540,9 @@ bool append_roster_notification(
         session.activityRosterStaged.retirementPriorEpoch = retirementPriorEpoch;
         session.activityRosterStaged.retirementBaseEpoch = retirementBaseEpoch;
         session.activityRosterStaged.retirementEpoch = retirementEpoch;
+        session.activityRosterStaged.claimEntities = claim.slots;
+        session.activityRosterStaged.claimBubble = grant.bubble;
+        session.activityRosterStaged.hasClaim = hasClaim;
         session.activityRosterStaged.decodeMap = decodeMap;
         session.activityRosterStaged.bindingGeneration = session.activity.bindingGeneration;
         session.activityRosterStaged.priorLeases = initialLeases;
@@ -608,6 +643,10 @@ bool append_roster_notification(
 
 bool validate_staged_roster(const Session& session) noexcept {
     const auto& staged = session.activityRosterStaged;
+    if (staged.staged && staged.hasClaim) {
+        return staged.bindingGeneration == session.activity.bindingGeneration
+               && staged.retirementPriorEpoch == session.activity.replicationEpoch;
+    }
     return !staged.staged || !staged.entityRetirement.pending
            || (staged.bindingGeneration == session.activity.bindingGeneration
                && staged.retirementPriorEpoch == session.activity.replicationEpoch
@@ -621,6 +660,11 @@ bool validate_staged_roster(const Session& session) noexcept {
 bool begin_staged_roster_publication(
     const Session& session, server::gameplay::entity_identities::PublicationLease& lease) noexcept {
     const auto& staged = session.activityRosterStaged;
+    // A claim pins no retained identity, only the epoch it was built on.
+    if (staged.staged && staged.hasClaim) {
+        return staged.bindingGeneration == session.activity.bindingGeneration
+               && staged.retirementPriorEpoch == session.activity.replicationEpoch;
+    }
     return !staged.staged || !staged.entityRetirement.pending
            || (staged.bindingGeneration == session.activity.bindingGeneration
                && staged.retirementPriorEpoch == session.activity.replicationEpoch
@@ -756,6 +800,29 @@ void commit_staged_roster(Session& session) noexcept {
     if (session.activityRosterStaged.hasGrant) {
         state::activity::bubble_authority::record_grant(session.activity.session.sessionId,
                                                         session.activityRosterStaged.grant);
+    }
+    if (session.activityRosterStaged.hasClaim) {
+        const auto& staged = session.activityRosterStaged;
+        commit_replication_steps(session, staged.retirementSequence + 1);
+        state::activity::bubble_authority::record_claim(
+            session.activity.session.sessionId, staged.claimBubble, staged.claimEntities);
+        unsigned slots = 0;
+        for (const std::byte byte : staged.claimEntities) {
+            slots += static_cast<unsigned>(std::popcount(std::to_integer<unsigned>(byte)));
+        }
+        std::array<char, core::log::kLineCapacity> line{};
+        const int count = std::snprintf(line.data(),
+                                        line.size(),
+                                        "ev=activity stage=claim result=published bubble=%u "
+                                        "slots=%u epoch=%u",
+                                        static_cast<unsigned>(staged.claimBubble),
+                                        slots,
+                                        static_cast<unsigned>(session.activity.replicationEpoch));
+        if (count > 0) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::info,
+                             {line.data(), static_cast<std::size_t>(count)});
+        }
     }
     if (session.activityRosterStaged.hasHostState) {
         session.activityHostStateRevision = session.activityRosterStaged.hostStateRevision;

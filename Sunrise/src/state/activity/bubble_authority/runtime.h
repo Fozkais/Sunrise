@@ -47,6 +47,15 @@ void record_abdication(std::uint64_t sessionId,
                        const EntitySlotMask* mask = nullptr) noexcept;
 
 /**
+ * Keeps the entities a client abandoned in a bubble it left for the next client granted it.
+ * The bubble's grant is left as it is; the abdication that comes with it releases that.
+ * @param sessionId Joined activity session.
+ * @param bubble Bubble named by the accepted abandon.
+ * @param mask Abandoned entities, merged with earlier reports.
+ */
+void record_abandon(std::uint64_t sessionId, std::uint8_t bubble, const EntitySlotMask& mask) noexcept;
+
+/**
  * Copies the released entities awaiting a claim in one bubble.
  * @param sessionId Joined activity session.
  * @param bubble Bubble whose released entities are requested.

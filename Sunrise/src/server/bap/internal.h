@@ -149,6 +149,13 @@ struct RosterPublication {
     std::uint8_t retirementPriorEpoch{};
     std::uint8_t retirementBaseEpoch{};
     std::uint8_t retirementEpoch{};
+    /**
+     * Entities given up in the granted bubble, handed back with the grant on the retirement
+     * epoch above. The two never ride one body.
+     */
+    state::activity::bubble_authority::EntitySlotMask claimEntities{};
+    std::uint8_t claimBubble{};
+    bool hasClaim{};
     bool priorRosterOwedForEpoch{};
     /** Exact decode identities carried by this staged complete roster snapshot. */
     RosterDecodeMap decodeMap{};

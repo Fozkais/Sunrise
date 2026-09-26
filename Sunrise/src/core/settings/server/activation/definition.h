@@ -46,6 +46,12 @@ struct Settings {
      * when the line arrives, alone or not. Off, every line keeps its filter.
      */
     bool unfilteredSharedDialogue{true};
+    /**
+     * A client granted the bubble it stands in is handed back the entities given up there, so
+     * enemies, vehicles and objects it left behind move and answer again once it returns. Off,
+     * those entities stay without an authoritative client until the activity restarts.
+     */
+    bool claimReleasedEntities{true};
 };
 
 } // namespace sunrise::core::settings::server::activation

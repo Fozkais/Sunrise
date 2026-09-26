@@ -167,6 +167,12 @@ void submit_committed_authority_abdication(Session& session,
         || plan.sessionId != session.activity.session.sessionId) {
         return;
     }
+    // An abandon only hands its entities to the next client granted the bubble.
+    if (plan.authorityAbdication.abandon) {
+        state::activity::bubble_authority::record_abandon(
+            plan.sessionId, plan.authorityAbdication.bubble, plan.authorityAbdication.entities);
+        return;
+    }
     state::activity::bubble_authority::record_abdication(
         plan.sessionId, plan.authorityAbdication.bubble, &plan.authorityAbdication.entities);
     server::gameplay::squad_entity_retirement::observe_abdication(

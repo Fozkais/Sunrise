@@ -113,6 +113,8 @@ struct AuthorityAbdicationIngress final {
     std::uint64_t sourceGeneration{};
     std::uint8_t bubble{};
     bool pending{};
+    /** Msg 26: the entities are abandoned, and the bubble's grant is not given up with them. */
+    bool abandon{};
 };
 
 /** A purge request retains its exact mask and the next shared replication epoch. */

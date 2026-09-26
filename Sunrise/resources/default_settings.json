@@ -58,7 +58,8 @@
       "mission_scripting": true,
       "single_private_ambassador": true,
       "peer_region_facts": true,
-      "unfiltered_shared_dialogue": true
+      "unfiltered_shared_dialogue": true,
+      "claim_released_entities": true
     }
   },
   "state": {

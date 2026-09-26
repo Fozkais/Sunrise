@@ -106,7 +106,8 @@ constexpr std::uint32_t kCurrentRevision = 0;
     if (!published || framedSize == 0 || framedSize > response.size()
         || !begin_staged_roster_publication(session, entityLease)
         || (session.activityRosterStaged.staged
-            && session.activityRosterStaged.entityRetirement.pending
+            && (session.activityRosterStaged.entityRetirement.pending
+                || session.activityRosterStaged.hasClaim)
             && !state::activity::advance_replication_sequence(
                 session.activity.session, session.activityRosterStaged.retirementSequence))) {
         // Nothing left, so a roster staged into the discarded body is offered again next push.

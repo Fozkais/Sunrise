@@ -111,6 +111,23 @@ void record_abdication(std::uint64_t sessionId,
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
 }
 
+/** Merges one bubble's abandoned entities into its pending claim. */
+void record_abandon(std::uint64_t sessionId, std::uint8_t bubble, const EntitySlotMask& mask) noexcept {
+    if (sessionId == kAbsentSessionId || bubble >= kAuthoritySlotCount) {
+        return;
+    }
+    AcquireSRWLockExclusive(&runtime::storage::g_stateLock);
+    ActivityState& state = runtime::storage::g_state.activity;
+    const std::size_t target = activity::transactions::find_session(state, sessionId);
+    if (target != kInvalidSessionSlot) {
+        auto& released = state.sessions[target].bubbleAuthority.releasedEntities[bubble];
+        for (std::size_t index = 0; index < released.size(); ++index) {
+            released[index] |= mask[index];
+        }
+    }
+    ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
+}
+
 /**
  * A claim snapshots the complete pending mask without consuming it.
  * @param sessionId Joined activity session.

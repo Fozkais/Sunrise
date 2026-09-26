@@ -371,7 +371,7 @@ bool prepare_authority_purge(const ActivityClientBinding& binding,
     return true;
 }
 
-/** A valid abdication changes ownership only after its frame commits. */
+/** A valid abdication or abandon changes ownership only after its frame commits. */
 bool prepare_authority_abdication(const ActivityClientBinding& binding,
                                   const RosterDecodeMap& rosterDecode,
                                   IngressAdapter adapter,
@@ -379,7 +379,10 @@ bool prepare_authority_abdication(const ActivityClientBinding& binding,
                                   ActivityPlan& plan,
                                   bool& hasTransaction) noexcept {
     service::entity_authority::Release release{};
-    const bool parsed = service::entity_authority::parse_abdicate(request.payload, release);
+    const bool abandon = adapter == IngressAdapter::authorityAbandon;
+    const bool parsed = abandon
+                            ? service::entity_authority::parse_abandon(request.payload, release)
+                            : service::entity_authority::parse_abdicate(request.payload, release);
     if (!frame_only(binding, rosterDecode, adapter, request)) {
         return false;
     }
@@ -391,6 +394,7 @@ bool prepare_authority_abdication(const ActivityClientBinding& binding,
     plan.authorityAbdication.entities = release.mask;
     plan.authorityAbdication.bubble = release.selector;
     plan.authorityAbdication.pending = true;
+    plan.authorityAbdication.abandon = abandon;
     plan.delivery = Delivery::none;
     plan.mutationDomain = MutationDomain::authorityAbdication;
     hasTransaction = true;
