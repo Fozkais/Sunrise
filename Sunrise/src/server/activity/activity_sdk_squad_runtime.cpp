@@ -485,6 +485,7 @@ retirement_eligibility(const sdk::BoundView& view,
         server::bap::squad_route(view.binding,
                                  view.activityClientGeneration,
                                  ownerStatus == Status::ready ? output.target.registryKey : 0,
+                                 output.target.slotIndex,
                                  bubble);
     Status status = ownerStatus;
     const bool rerouted = route.generation != view.activityClientGeneration;

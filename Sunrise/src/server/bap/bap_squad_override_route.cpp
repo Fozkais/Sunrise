@@ -359,6 +359,7 @@ bool request_activity_squad_override(
 SquadRoute squad_route(const state::activity::SessionBinding& binding,
                        std::uint64_t ownerGeneration,
                        std::uint32_t registryKey,
+                       std::uint16_t slotIndex,
                        std::int32_t bubble) noexcept {
     SquadRoute route{ownerGeneration, SquadRouteReason::owner};
     if (ownerGeneration == 0 || !core::settings::get().server.activation.singlePrivateAmbassador) {
@@ -371,16 +372,19 @@ SquadRoute squad_route(const state::activity::SessionBinding& binding,
                && session.activity.bindingGeneration != 0
                && state::activity::same_binding(session.activity.session, binding);
     };
-    // An object whose squads a link already retains stays on that link: its later bodies are
-    // composed onto the ones that link holds, and a second link would spawn the squad again.
+    // A squad a link already retains stays on that link: its later bodies are composed onto the
+    // one that link holds, and a second link would spawn the squad again. Only that squad stays:
+    // the other squads of its object belong to whoever simulates the bubble now.
     for (const Session& session : sessions()) {
         const SquadOverrideLease& lease = session.activitySquadOverride;
         if (registryKey == 0 || !live(session) || !lease.active
             || lease.bindingGeneration != session.activity.bindingGeneration) {
             continue;
         }
-        for (std::size_t index = 0; index < lease.groupCount; ++index) {
-            if (lease.groups[index].scopeTarget.registryKey == registryKey) {
+        for (std::size_t index = 0; index < lease.authCount; ++index) {
+            const RetainedSquadAuth& retained = lease.authBodies[index];
+            if (retained.groupIndex < lease.groupCount && retained.slotIndex == slotIndex
+                && lease.groups[retained.groupIndex].scopeTarget.registryKey == registryKey) {
                 return {session.activity.bindingGeneration, SquadRouteReason::retained};
             }
         }

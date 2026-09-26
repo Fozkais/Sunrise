@@ -53,7 +53,11 @@ assign_combat_objective_reserved(const state::activity_sdk::BoundView& view,
     // The objective composes onto the squad's placement, so it goes to the link that placed it.
     state::activity_sdk::BoundView routed = view;
     const server::bap::SquadRoute route = server::bap::squad_route(
-        view.binding, view.activityClientGeneration, prepared.target.registryKey, -1);
+        view.binding,
+        view.activityClientGeneration,
+        prepared.target.registryKey,
+        prepared.target.slotIndex,
+        -1);
     if (route.generation != view.activityClientGeneration) {
         routed.activityClientGeneration = route.generation;
         detail::PreparedDevice candidate{};

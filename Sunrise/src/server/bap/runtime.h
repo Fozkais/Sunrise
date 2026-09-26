@@ -413,7 +413,7 @@ activity_authority_reset_snapshot(const state::activity::SessionBinding& binding
 enum class SquadRouteReason : std::uint8_t {
     /** The mission owner's link: a lone member, the switch is off, or no other link qualifies. */
     owner,
-    /** The link that already retains squads of the same generated object. */
+    /** The link that already retains this exact squad. */
     retained,
     /** The link of the member that simulates the squad's bubble. */
     ambassador,
@@ -430,17 +430,20 @@ struct SquadRoute final {
 /**
  * Picks the ActivityClient generation a squad body goes to in a shared activity.
  * Only the game that simulates a bubble spawns its squads, so a squad goes to the link of its
- * bubble's ambassador. An object whose squads one link already retains keeps that link, so a
- * later objective or placement composes onto the bodies that link holds.
+ * bubble's ambassador. A squad one link already retains keeps that link, so a later objective
+ * or placement composes onto the body that link holds; the other squads of its object follow
+ * the ambassador of the moment.
  * @param binding Exact activity session.
  * @param ownerGeneration Generation of the mission owner's link, the answer when nothing else is.
  * @param registryKey Generated object key of the squad, or zero when it is not resolved yet.
+ * @param slotIndex Wire slot of the squad inside that object.
  * @param bubble Bubble of the squad's authored occurrence, or -1 when unknown.
  * @return The generation to address and why.
  */
 [[nodiscard]] SquadRoute squad_route(const state::activity::SessionBinding& binding,
                                      std::uint64_t ownerGeneration,
                                      std::uint32_t registryKey,
+                                     std::uint16_t slotIndex,
                                      std::int32_t bubble) noexcept;
 
 /** Cancels one exact typed override revision while excluding activity-link publication. */
