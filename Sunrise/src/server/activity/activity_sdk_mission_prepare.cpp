@@ -1,8 +1,12 @@
 #include <Windows.h>
 
 #include <array>
+#include <cstdio>
 #include <limits>
+#include <span>
 
+#include "../../core/logging/log.h"
+#include "../../core/settings/settings.h"
 #include "../../middleware/bap/activity_message/sensor_auth_update.h"
 #include "../../state/activity/runtime.h"
 #include "activity_sdk_behavior_scope.h"
@@ -274,7 +278,7 @@ namespace {
 }
 
 /** Resolves one exact generated scene without changing transport state. */
-[[nodiscard]] SceneStatus prepare_scene(const sdk::BoundView& view,
+[[nodiscard]] SceneStatus prepare_scene_on(const sdk::BoundView& view,
                                         std::uint32_t occurrenceRow,
                                         std::uint32_t slotRow,
                                         PreparedScene& output) noexcept {
@@ -405,7 +409,7 @@ namespace {
 }
 
 /** Resolves one exact SDK-bounded type-53 cue without changing transport state. */
-[[nodiscard]] SceneStatus prepare_dialogue(const sdk::BoundView& view,
+[[nodiscard]] SceneStatus prepare_dialogue_on(const sdk::BoundView& view,
                                            std::uint32_t occurrenceRow,
                                            std::uint32_t slotRow,
                                            std::uint16_t cueIndex,
@@ -499,7 +503,7 @@ namespace {
 }
 
 /** Resolves one exact fixed-schema behavior slot without changing transport state. */
-[[nodiscard]] SceneStatus prepare_typed_behavior(const sdk::BoundView& view,
+[[nodiscard]] SceneStatus prepare_typed_behavior_on(const sdk::BoundView& view,
                                                  std::uint32_t occurrenceRow,
                                                  std::uint32_t slotRow,
                                                  std::uint32_t expectedSlotType,
@@ -646,6 +650,105 @@ namespace {
                                   sdk::format::kObjectiveAuthSchema,
                                   false,
                                   output);
+}
+
+namespace {
+
+/** Most members a shared activity routes a scene, cue or behavior between. */
+constexpr std::size_t kRouteLinkCapacity = 8;
+
+/**
+ * Prepares one authored scene, cue or behavior on the link that can carry it.
+ * A state-local target is live only for a member standing in its state. The owner's link tries
+ * first. When the owner stands in another state, every other member's link is tried, and the
+ * first one standing there carries it; that link's own mission seed publishes the target.
+ * @param attempt Prepares on the link the view it is handed names; writes the caller's output.
+ * @param what Log name of the prepared kind.
+ */
+template <class Attempt>
+[[nodiscard]] SceneStatus
+prepare_on_member_link(const sdk::BoundView& view, const char* what, Attempt&& attempt) noexcept {
+    const SceneStatus owner = attempt(view);
+    if (owner != SceneStatus::wrongState
+        || !core::settings::get().server.activation.singlePrivateAmbassador) {
+        return owner;
+    }
+    std::array<server::bap::ActivityMemberLink, kRouteLinkCapacity> links{};
+    const std::size_t count = server::bap::activity_member_links(view.binding, std::span(links));
+    std::uint64_t routedGeneration = 0;
+    SceneStatus status = owner;
+    for (std::size_t index = 0; index < count; ++index) {
+        if (links[index].activityClientGeneration == view.activityClientGeneration) {
+            continue;
+        }
+        sdk::BoundView routed = view;
+        routed.activityClientGeneration = links[index].activityClientGeneration;
+        status = attempt(routed);
+        if (status == SceneStatus::ready) {
+            routedGeneration = routed.activityClientGeneration;
+            break;
+        }
+    }
+    if (count > 1) {
+        std::array<char, core::log::kLineCapacity> line{};
+        const int written = std::snprintf(line.data(),
+                                          line.size(),
+                                          "ev=activity stage=scene_route result=%s kind=%s "
+                                          "owner_gen=%llu gen=%llu",
+                                          routedGeneration != 0 ? "routed" : "unrouted",
+                                          what,
+                                          static_cast<unsigned long long>(
+                                              view.activityClientGeneration),
+                                          static_cast<unsigned long long>(routedGeneration));
+        if (written > 0) {
+            core::log::write(core::log::Channel::server,
+                             core::log::Level::info,
+                             {line.data(), static_cast<std::size_t>(written)});
+        }
+    }
+    return routedGeneration != 0 ? SceneStatus::ready : owner;
+}
+
+} // namespace
+
+[[nodiscard]] SceneStatus prepare_scene(const sdk::BoundView& view,
+                                        std::uint32_t occurrenceRow,
+                                        std::uint32_t slotRow,
+                                        PreparedScene& output) noexcept {
+    return prepare_on_member_link(view, "scene", [&](const sdk::BoundView& on) noexcept {
+        return prepare_scene_on(on, occurrenceRow, slotRow, output);
+    });
+}
+
+[[nodiscard]] SceneStatus prepare_dialogue(const sdk::BoundView& view,
+                                           std::uint32_t occurrenceRow,
+                                           std::uint32_t slotRow,
+                                           std::uint16_t cueIndex,
+                                           PreparedScene& output,
+                                           std::uint16_t& authoredCueCount) noexcept {
+    return prepare_on_member_link(view, "dialogue", [&](const sdk::BoundView& on) noexcept {
+        return prepare_dialogue_on(on, occurrenceRow, slotRow, cueIndex, output, authoredCueCount);
+    });
+}
+
+[[nodiscard]] SceneStatus prepare_typed_behavior(const sdk::BoundView& view,
+                                                 std::uint32_t occurrenceRow,
+                                                 std::uint32_t slotRow,
+                                                 std::uint32_t expectedSlotType,
+                                                 std::uint32_t expectedComponentClass,
+                                                 std::uint32_t expectedAuthSchema,
+                                                 bool requireTaskTarget,
+                                                 PreparedScene& output) noexcept {
+    return prepare_on_member_link(view, "behavior", [&](const sdk::BoundView& on) noexcept {
+        return prepare_typed_behavior_on(on,
+                                         occurrenceRow,
+                                         slotRow,
+                                         expectedSlotType,
+                                         expectedComponentClass,
+                                         expectedAuthSchema,
+                                         requireTaskTarget,
+                                         output);
+    });
 }
 
 } // namespace sunrise::server::activity::activity_sdk_mission::detail
