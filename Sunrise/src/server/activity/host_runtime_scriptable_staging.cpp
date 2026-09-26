@@ -1,6 +1,10 @@
 #include <algorithm>
+#include <array>
 #include <limits>
 
+#include "../../middleware/bap/activity_message/interactable_object_auth.h"
+#include "../../middleware/bap/activity_message/mission_auth_patch.h"
+#include "../../middleware/encoding/bit_reader.h"
 #include "../../state/activity/mission/runtime.h"
 #include "../../state/activity/runtime.h"
 #include "../gameplay/squad_entity_retirement.h"
@@ -539,6 +543,62 @@ std::uint64_t scriptable_estate_revision(const state::activity::SessionBinding& 
         instance != nullptr && instance->view.active ? instance->scriptableEstateRevision : 0;
     ReleaseSRWLockShared(&g_lock);
     return revision;
+}
+
+/** Shares one member's use of an interactable object with every member. */
+InteractionLatchStatus share_interaction_latch(const state::activity::SessionBinding& binding,
+                                               const ScriptableTarget& target,
+                                               std::uint32_t& revision) noexcept {
+    namespace object = middleware::bap::activity_message::interactable_object;
+    namespace fields = middleware::bap::activity_message::auth_fields;
+    namespace patch = middleware::bap::activity_message::mission_auth_patch;
+    // The body ends on the use row: a 32-bit signed revision, then the one-bit latch.
+    constexpr std::size_t kRowBits = 32 + fields::kBoolWidth;
+    revision = 0;
+    AcquireSRWLockExclusive(&g_lock);
+    Instance* const instance = find_instance(binding);
+    PendingScriptableOverride* retained = nullptr;
+    if (instance != nullptr && instance->view.active) {
+        for (PendingScriptableOverride& candidate : instance->scriptableAuthEstate) {
+            if (candidate.kind == ScriptableOverrideKind::interactableObject
+                && candidate.target.objectTag == target.objectTag
+                && candidate.target.registryKey == target.registryKey
+                && candidate.target.slotIndex == target.slotIndex
+                && candidate.target.slotType == target.slotType) {
+                retained = &candidate;
+                break;
+            }
+        }
+    }
+    if (retained == nullptr) {
+        ReleaseSRWLockExclusive(&g_lock);
+        return InteractionLatchStatus::absent;
+    }
+    const std::size_t bits = retained->bitCount;
+    const auto body = std::span(retained->body).first(retained->byteCount);
+    std::uint64_t previous = 0;
+    middleware::encoding::bits::Reader reader(body);
+    const bool layout = (bits == object::kBits || bits == object::kOwnerBits)
+                        && reader.skip(bits - kRowBits) && reader.read(32, previous)
+                        && previous >= fields::kSigned32Bias
+                        && previous - fields::kSigned32Bias < fields::kMaximumCounter;
+    std::array<std::byte, sizeof(retained->body)> rewritten{};
+    std::size_t written = 0;
+    const auto next = static_cast<std::uint32_t>(previous - fields::kSigned32Bias) + 1U;
+    middleware::encoding::bits::Writer writer(rewritten);
+    const bool encoded = layout && patch::copy_field(writer, body, {0, bits - kRowBits, true})
+                         && writer.write(next + fields::kSigned32Bias, 32)
+                         && writer.write(1, fields::kBoolWidth) && writer.finish(written)
+                         && written == retained->byteCount;
+    if (encoded) {
+        std::copy_n(rewritten.begin(), written, retained->body.begin());
+        const std::uint64_t serial = next_nonzero(instance->scriptableEstateRevision);
+        retained->estateSerial = serial;
+        instance->scriptableEstateRevision = serial;
+        revision = next;
+    }
+    ReleaseSRWLockExclusive(&g_lock);
+    return encoded ? InteractionLatchStatus::republished : InteractionLatchStatus::malformed;
 }
 
 namespace detail {

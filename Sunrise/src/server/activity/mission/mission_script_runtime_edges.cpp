@@ -8,7 +8,9 @@
 
 #include "../../../middleware/bap/activity_message/damage_monitor_auth.h"
 #include "../../../middleware/bap/activity_message/ghost_link_auth.h"
+#include "../../../core/settings/settings.h"
 #include "../../../middleware/bap/activity_message/scriptable_auth_body.h"
+#include "../../bap/runtime.h"
 #include "../activity_sdk_mission_runtime.h"
 #include "mission_script_runtime_internal.h"
 #include "mission_script_runtime_objective.h"
@@ -208,6 +210,45 @@ void objective_task_counters(std::span<const sense_values::DecodedValue> body,
         ++tasks;
     }
     output.blocks = static_cast<std::uint8_t>((std::min)(blocks, output.value.size()));
+}
+
+/**
+ * Shares one member's use of an interactable object with the other members of a shared
+ * activity. The member that uses an object is often not the one that simulates it, so without
+ * this the others could still use an object that is gone for the member who took it.
+ * @param observation The object report that carried the first use of its generation.
+ */
+void share_interaction(const RuntimeInstance& instance,
+                       const host::SenseObservation& observation) noexcept {
+    std::array<server::bap::ActivityMemberLink, 2> links{};
+    if (!core::settings::get().server.activation.singlePrivateAmbassador
+        || server::bap::activity_member_links(instance.view.binding, std::span(links)) < 2) {
+        return;
+    }
+    host::ScriptableTarget target{};
+    target.objectTag = observation.key.objectTag;
+    target.registryKey = observation.key.registryKey;
+    target.slotIndex = observation.key.slotIndex;
+    target.slotType = observation.key.slotType;
+    std::uint32_t revision = 0;
+    const host::InteractionLatchStatus status =
+        host::share_interaction_latch(instance.view.binding, target, revision);
+    std::array<char, 96> fields{};
+    const int written = std::snprintf(fields.data(),
+                                      fields.size(),
+                                      "registry=%08X slot=%u revision=%u",
+                                      observation.key.registryKey,
+                                      static_cast<unsigned>(observation.key.slotIndex),
+                                      static_cast<unsigned>(revision));
+    log_line(status == host::InteractionLatchStatus::republished ? core::log::Level::info
+                                                                 : core::log::Level::debug,
+             &instance,
+             "interaction_share",
+             status == host::InteractionLatchStatus::republished ? "republished"
+             : status == host::InteractionLatchStatus::absent    ? "absent"
+                                                                 : "malformed",
+             written > 0 ? std::string_view(fields.data(), static_cast<std::size_t>(written))
+                         : std::string_view{});
 }
 
 } // namespace
@@ -483,6 +524,7 @@ void push_object_interaction_edges(RuntimeInstance& instance,
         if (interacted) {
             event.kind = host::EventKind::objectInteracted;
             push_script_event(instance, event);
+            share_interaction(instance, observation);
         }
     }
 }

@@ -963,6 +963,30 @@ latest_dialogue_serial(const state::activity::SessionBinding& binding) noexcept;
 [[nodiscard]] std::uint64_t
 scriptable_estate_revision(const state::activity::SessionBinding& binding) noexcept;
 
+/** What one attempt to share an interactable object's use did. */
+enum class InteractionLatchStatus : std::uint8_t {
+    /** The retained body now names the use at a newer row revision; every link republishes it. */
+    republished,
+    /** No interactable body is retained for that slot, so there is nothing to share. */
+    absent,
+    /** The retained body does not have the interactable layout. */
+    malformed,
+};
+
+/**
+ * Shares one member's use of an interactable object with every member.
+ * A client latches a use on its own copy of the object; the other members' clients only learn of
+ * it from a row revision newer than theirs. The retained body's row is latched at the next
+ * revision, so every member's next roster carries the use and every client closes the object.
+ * @param binding Exact activity session.
+ * @param target The object slot the use was reported on.
+ * @param revision Receives the row revision the body now carries.
+ */
+[[nodiscard]] InteractionLatchStatus
+share_interaction_latch(const state::activity::SessionBinding& binding,
+                        const ScriptableTarget& target,
+                        std::uint32_t& revision) noexcept;
+
 /** Queues a native objective decision after both SDK slot identities are validated. */
 [[nodiscard]] bool
 request_squad_objective(const state::activity::SessionBinding& binding,
