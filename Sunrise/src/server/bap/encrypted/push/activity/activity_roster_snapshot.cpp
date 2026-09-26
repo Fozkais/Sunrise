@@ -441,12 +441,15 @@ build_roster_snapshot(Session& session,
                                                     session.activityDialogueSerial,
                                                     session.activity.bindingGeneration,
                                                     pulse);
+    // Only into the region it played in: another region's sensor is a fresh one, which would
+    // take the carried line as new and play it again.
     const bool carriedPulse =
         !freshPulse
         && server::activity::host::heard_dialogue_pulse(session.activity.session,
                                                         session.activityDialogueSerial,
                                                         session.activity.bindingGeneration,
-                                                        pulse);
+                                                        pulse)
+        && (!pulse.target.stateLocalRoster || pulse.target.stateLocalRegion == region.index);
     if (freshPulse || carriedPulse) {
         if (freshPulse) {
             session.activityDialogueSerialBuilt = pulse.estateSerial;
