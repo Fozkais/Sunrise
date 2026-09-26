@@ -21,6 +21,7 @@
 #include "../../../core/settings/settings.h"
 #include "../../../state/activity/mission/runtime.h"
 #include "../../../state/activity/runtime.h"
+#include "../../bap/runtime.h"
 #include "../../gameplay/squad_entity_retirement.h"
 #include "../host_runtime.h"
 #include "mission_script_event_batch.h"
@@ -60,6 +61,16 @@ snapshot_state_intents(const lua_vm::Vm& vm,
     }
     for (const PlayerLifeObservation& life : instance.playerLife) {
         if (instance.playerKey != 0 && life.playerKey == instance.playerKey) {
+            return life.life();
+        }
+    }
+    return PlayerLife::unknown;
+}
+
+/** @return The life of one member's own player, from the levels its client reported. */
+[[nodiscard]] PlayerLife member_player_life(const MemberLifeWatch& member) noexcept {
+    for (const PlayerLifeObservation& life : member.playerLife) {
+        if (member.playerKey != 0 && life.playerKey == member.playerKey) {
             return life.life();
         }
     }
@@ -132,6 +143,19 @@ void publish_fireteam_life(std::uint64_t now) noexcept {
         }
         FireteamLife counts{};
         counts.add(own_player_life(instance));
+        // Each other member of this same activity reports its own player; a member that left
+        // frees its entry and no longer counts.
+        for (MemberLifeWatch& member : instance.memberLife) {
+            if (member.generation == 0) {
+                continue;
+            }
+            server::bap::ActivityLinkView link{};
+            if (!server::bap::activity_link_view(instance.view.binding, member.generation, link)) {
+                member = {};
+                continue;
+            }
+            counts.add(member_player_life(member));
+        }
         for (const SessionRosterWatch& peer : instance.sessionRoster) {
             if (!peer.used) {
                 continue;
@@ -180,13 +204,15 @@ void publish_fireteam_life(std::uint64_t now) noexcept {
     }
 }
 
-/** Merges the type-13 participation records of one Sense snapshot into the instance. */
-void observe_player_life(RuntimeInstance& instance,
+namespace {
+
+/**
+ * Merges the type-13 participation records of one Sense snapshot into one player-slot table.
+ * @param playerKey The player key the reporting link's message 5 binds.
+ */
+void merge_participation(std::array<PlayerLifeObservation, kParticipationSlotCount>& table,
+                         std::uint64_t playerKey,
                          const host::SenseObservationSnapshot& sense) noexcept {
-    if (instance.playerLifeGeneration != sense.sourceGeneration) {
-        instance.playerLife = {};
-        instance.playerLifeGeneration = sense.sourceGeneration;
-    }
     for (std::size_t index = 0; index < sense.observationCount; ++index) {
         const host::SenseObservation& observation = sense.observations[index];
         if (observation.key.slotType != kParticipationSlotType
@@ -198,18 +224,62 @@ void observe_player_life(RuntimeInstance& instance,
             || observation.valueCount > sense.valueCount - observation.firstValue) {
             continue;
         }
-        PlayerLifeObservation& level =
-            instance.playerLife[observation.key.slotIndex - kFirstParticipationSlot];
+        PlayerLifeObservation& level = table[observation.key.slotIndex - kFirstParticipationSlot];
         update_player_life(
             level, std::span(sense.values).subspan(observation.firstValue, observation.valueCount));
-        // The host writes its own player key on every participation record of this link, so a
-        // record that reports state is that player's.
+        // The host writes the link's own player key on every participation record of that link,
+        // so a record that reports state is that player's.
         if ((level.seen & kLifeSeenKey) == 0 && (level.seen & kLifeSeenState) != 0
-            && instance.playerKey != 0) {
-            level.playerKey = instance.playerKey;
+            && playerKey != 0) {
+            level.playerKey = playerKey;
             level.seen |= kLifeSeenKey;
         }
     }
+}
+
+} // namespace
+
+/** Merges the type-13 participation records of one Sense snapshot into the instance. */
+void observe_player_life(RuntimeInstance& instance,
+                         const host::SenseObservationSnapshot& sense) noexcept {
+    if (instance.playerLifeGeneration != sense.sourceGeneration) {
+        instance.playerLife = {};
+        instance.playerLifeGeneration = sense.sourceGeneration;
+    }
+    merge_participation(instance.playerLife, instance.playerKey, sense);
+}
+
+/** Merges another member's participation records into that member's entry. */
+void observe_member_life(RuntimeInstance& instance,
+                         const host::SenseObservationSnapshot& sense) noexcept {
+    server::bap::ActivityLinkView link{};
+    if (sense.sourceGeneration == 0
+        || sense.sourceGeneration == instance.view.activityClientGeneration
+        || !server::bap::activity_link_view(instance.view.binding, sense.sourceGeneration, link)) {
+        return;
+    }
+    MemberLifeWatch* entry = nullptr;
+    MemberLifeWatch* spare = nullptr;
+    for (MemberLifeWatch& candidate : instance.memberLife) {
+        if (candidate.generation == sense.sourceGeneration) {
+            entry = &candidate;
+            break;
+        }
+        if (spare == nullptr && candidate.generation == 0) {
+            spare = &candidate;
+        }
+    }
+    if (entry == nullptr) {
+        if (spare == nullptr) {
+            log_line(core::log::Level::warn, &instance, "fireteam_life", "member_capacity");
+            return;
+        }
+        entry = spare;
+        *entry = {};
+        entry->generation = sense.sourceGeneration;
+    }
+    entry->playerKey = link.playerKey;
+    merge_participation(entry->playerLife, entry->playerKey, sense);
 }
 
 /**
@@ -394,6 +464,7 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     instance.sessionRosterObserved = false;
     instance.playerLife = {};
     instance.playerLifeGeneration = 0;
+    instance.memberLife = {};
     instance.lastFireteamLife = {};
     instance.fireteamLifePublished = false;
     std::vector<host::Event>{}.swap(instance.scriptEvents);

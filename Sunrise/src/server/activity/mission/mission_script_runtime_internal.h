@@ -212,6 +212,18 @@ struct SessionRosterWatch final {
     bool used{};
 };
 
+/** Most fireteam members, besides the program owner, whose life a program follows. */
+inline constexpr std::size_t kMemberLifeCapacity = 8;
+
+/** The participation levels one fireteam member's own client reports about its player. */
+struct MemberLifeWatch final {
+    std::array<PlayerLifeObservation, kParticipationSlotCount> playerLife{};
+    /** Generation of the member's link; zero for a free entry. */
+    std::uint64_t generation{};
+    /** The player key that member's message 5 binds, which its records report state for. */
+    std::uint64_t playerKey{};
+};
+
 /** Everything one bound mission program owns: its VM, views, delivery state and counters. */
 struct RuntimeInstance final {
     mission_state::AttemptState attempt{};
@@ -260,6 +272,8 @@ struct RuntimeInstance final {
     /** Participation levels of the sixteen player slots, for the client generation below. */
     std::array<PlayerLifeObservation, kParticipationSlotCount> playerLife{};
     std::uint64_t playerLifeGeneration{};
+    /** The same levels as each other member's own client reports them, one entry per link. */
+    std::array<MemberLifeWatch, kMemberLifeCapacity> memberLife{};
     /** Last published party life counts. Published once, then only on a change. */
     FireteamLife lastFireteamLife{};
     bool fireteamLifePublished{};
@@ -340,6 +354,13 @@ void push_program_event(RuntimeInstance& instance, const host::Event& event) noe
 void publish_fireteam_life(std::uint64_t now) noexcept;
 /** Merges the type-13 participation records of one Sense snapshot into the instance. */
 void observe_player_life(RuntimeInstance& instance,
+                         const host::SenseObservationSnapshot& sense) noexcept;
+/**
+ * Merges the participation records another member's own client reports into that member's
+ * entry, so the party's life counts every member and not the owner alone.
+ * @param sense Snapshot from a live member link that is not the owner's.
+ */
+void observe_member_life(RuntimeInstance& instance,
                          const host::SenseObservationSnapshot& sense) noexcept;
 
 /** Raises one event per watched trigger volume whose occupancy changed. */

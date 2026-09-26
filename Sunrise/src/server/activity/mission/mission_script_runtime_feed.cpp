@@ -784,9 +784,13 @@ lua_vm::CallStatus dispatch_event(RuntimeInstance& instance,
         push_cinematic(instance, event);
     }
     if (event.kind == host::EventKind::senseUpdate && sense != nullptr) {
-        // Player life is the owner's own participation, and a peer's generation would reset it.
+        // Each client reports its own player's participation: the owner's into the owner's
+        // levels, and every other member's into its own entry, so the party's life counts all.
         if (firstAttempt && sense->sourceGeneration == instance.view.activityClientGeneration) {
             observe_player_life(instance, *sense);
+            publish_fireteam_life(now);
+        } else if (firstAttempt && accepts_member_sense(instance, sense->sourceGeneration)) {
+            observe_member_life(instance, *sense);
             publish_fireteam_life(now);
         }
         push_trigger_edges(instance, *sense);
