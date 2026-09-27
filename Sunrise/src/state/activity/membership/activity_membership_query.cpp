@@ -401,6 +401,25 @@ ClientPlacement reported_placement(std::uint64_t sessionId) noexcept {
     return placement;
 }
 
+/** Reads the client's slice-set transition count. */
+std::uint8_t reported_transition_token(std::uint64_t sessionId) noexcept {
+    std::uint8_t token = kInitialTransitionToken;
+    if (sessionId == kAbsentSessionId) {
+        return token;
+    }
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const ActivityState& state = runtime::storage::g_state.activity;
+    const std::size_t target = activity::transactions::find_session(state, sessionId);
+    if (target != kInvalidSessionSlot && selected_member(state.sessions[target]) != nullptr) {
+        const MembershipState& membership = *selected_member(state.sessions[target]);
+        if (membership.hasTransitionToken) {
+            token = membership.transitionToken;
+        }
+    }
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    return token;
+}
+
 /** Names the region the client has instantiated. */
 std::int32_t instantiated_region(const ClientPlacement& placement) noexcept {
     return placement.currentRegion >= 0 ? placement.currentRegion : kAbsentRegionIndex;

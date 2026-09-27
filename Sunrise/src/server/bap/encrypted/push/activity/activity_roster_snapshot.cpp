@@ -441,15 +441,25 @@ build_roster_snapshot(Session& session,
                                                     session.activityDialogueSerial,
                                                     session.activity.bindingGeneration,
                                                     pulse);
-    // Only into the region it played in: another region's sensor is a fresh one, which would
-    // take the carried line as new and play it again.
-    const bool carriedPulse =
+    // Only into the region it played in, and only until the client starts another load: another
+    // region's sensor, or the one a load rebuilds, is a fresh one, which would take the carried
+    // line as new and play it again.
+    const std::uint8_t transitionToken =
+        state::activity::membership::reported_transition_token(session.activity.session.sessionId);
+    bool carriedPulse =
         !freshPulse
         && server::activity::host::heard_dialogue_pulse(session.activity.session,
                                                         session.activityDialogueSerial,
                                                         session.activity.bindingGeneration,
                                                         pulse)
         && (!pulse.target.stateLocalRoster || pulse.target.stateLocalRegion == region.index);
+    // The owning link hears a line through its scripted override, not as a fresh pulse here, so
+    // the count is noted the first time a line rides along, whichever way it was delivered.
+    if (freshPulse || (carriedPulse && pulse.estateSerial != session.activityDialogueHeardSerial)) {
+        session.activityDialogueHeardSerial = pulse.estateSerial;
+        session.activityDialogueHeardToken = transitionToken;
+    }
+    carriedPulse = carriedPulse && session.activityDialogueHeardToken == transitionToken;
     if (freshPulse || carriedPulse) {
         if (freshPulse) {
             session.activityDialogueSerialBuilt = pulse.estateSerial;

@@ -229,6 +229,13 @@ struct ClientPlacement final {
 [[nodiscard]] ClientPlacement reported_placement(std::uint64_t sessionId) noexcept;
 
 /**
+ * Reads the client's slice-set transition count: it advances as each load starts.
+ * @param sessionId Joined activity session.
+ * @return The last count the client reported or a host teleport advanced.
+ */
+[[nodiscard]] std::uint8_t reported_transition_token(std::uint64_t sessionId) noexcept;
+
+/**
  * Names the region the client has instantiated.
  * The current leg of the client's member record follows the slice-set manager. It moves only
  * when a slice-set switch has run, and reads -1 while no slice set is held.

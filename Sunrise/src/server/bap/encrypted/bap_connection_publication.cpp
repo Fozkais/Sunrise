@@ -75,6 +75,8 @@ void reset_join_state(Session& session) noexcept {
     session.activityDialogueSerial =
         server::activity::host::scriptable_estate_revision(session.activity.session);
     session.activityDialogueSerialBuilt = session.activityDialogueSerial;
+    session.activityDialogueHeardToken = -1;
+    session.activityDialogueHeardSerial = 0;
     session.activityDialogueAttemptedSerial = 0;
     session.activityRosterAwaitClientSync = false;
     authority_query::reset(session.activityAuthorityQuery, session.activity.bindingGeneration);
@@ -231,6 +233,8 @@ void publish_connection_fields(Session& session,
         session.activityDialogueSerial =
             server::activity::host::scriptable_estate_revision(session.activity.session);
         session.activityDialogueSerialBuilt = session.activityDialogueSerial;
+        session.activityDialogueHeardToken = -1;
+        session.activityDialogueHeardSerial = 0;
         session.activityDialogueAttemptedSerial = 0;
     }
     // A private join burst delivered the seed membership body; commit the matching identity so

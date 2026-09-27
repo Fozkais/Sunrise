@@ -495,6 +495,13 @@ struct Session {
     std::uint64_t activityDialogueSerial{};
     /** Serial the roster being built would advance the cursor above to; staged with the body. */
     std::uint64_t activityDialogueSerialBuilt{};
+    /**
+     * The line this link carries, by estate serial, and the client's transition count when that
+     * line first rode in a body, or -1. Each load builds a fresh dialogue sensor that would take a
+     * carried line as new, so a line rides along only until the client starts its next load.
+     */
+    std::uint64_t activityDialogueHeardSerial{};
+    std::int16_t activityDialogueHeardToken{-1};
     /** Dialogue serial last tried; a line whose roster cannot be built retries on the keepalive. */
     std::uint64_t activityDialogueAttemptedSerial{};
     /** The delivered roster carries the team wait bit; the arrival report is answered while set. */
