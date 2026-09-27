@@ -31,11 +31,25 @@ struct Peer {
     std::uint64_t inputStartedTick{};
     std::uint64_t outputProgressTick{};
     std::size_t streamSize{};
-    std::array<std::byte, kStreamCapacity> stream{};
     std::size_t outputOffset{};
     std::size_t outputSize{};
-    std::array<std::byte, client::network::kBapFrameCapacity> output{};
 };
+
+/**
+ * One peer slot's frame buffers. They stay out of `Peer`, whose socket sentinel is not zero: a
+ * table holding them would be stored whole in the image, a megabyte of zeros per slot, while a
+ * table of these alone is zero-filled at load and takes no room in the file.
+ */
+struct PeerBuffers {
+    std::array<std::byte, kStreamCapacity> stream;
+    std::array<std::byte, client::network::kBapFrameCapacity> output;
+};
+
+/**
+ * @param peer Live peer; its connection id names its slot.
+ * @return The frame buffers of that peer's slot.
+ */
+[[nodiscard]] PeerBuffers& buffers(const Peer& peer) noexcept;
 
 /**
  * Applies a chosen 30-second resource limit independently to authentication, partial-frame

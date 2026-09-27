@@ -33,7 +33,7 @@ bool offer(Peer& peer, client::network::BapEvent event, std::span<const std::byt
     }
     client::network::BapResponse response{};
     const client::network::BapRequest request{
-        event, peer.connectionId, frame, peer.output, peer.remoteAddress};
+        event, peer.connectionId, frame, buffers(peer).output, peer.remoteAddress};
     const bool handled = bap::consume(request, response);
     if (response.closeConnection) {
         return false;
@@ -43,7 +43,7 @@ bool offer(Peer& peer, client::network::BapEvent event, std::span<const std::byt
     if (!handled || response.size == 0) {
         return true;
     }
-    if (response.size > peer.output.size()) {
+    if (response.size > buffers(peer).output.size()) {
         return false;
     }
     peer.outputOffset = 0;
@@ -57,7 +57,7 @@ bool drain_stream(Peer& peer) noexcept {
     if (peer.outputSize != 0) {
         return true;
     }
-    const auto pending = std::span(peer.stream).first(peer.streamSize);
+    const auto pending = std::span(buffers(peer).stream).first(peer.streamSize);
     const std::size_t total = frame_size(pending);
     if (total == 0) {
         return peer.streamSize != kStreamCapacity;
@@ -89,7 +89,8 @@ bool drain_stream(Peer& peer) noexcept {
     peer.streamSize -= total;
     peer.inputStartedTick = peer.serviceTick;
     if (peer.streamSize != 0) {
-        std::memmove(peer.stream.data(), peer.stream.data() + total, peer.streamSize);
+        auto& stream = buffers(peer).stream;
+        std::memmove(stream.data(), stream.data() + total, peer.streamSize);
     }
     return true;
 }

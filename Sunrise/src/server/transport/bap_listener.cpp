@@ -20,6 +20,8 @@ namespace sunrise::server::transport {
 namespace {
 
 core::threading::DataMutex<Listener> g_listener;
+/** Indexed by peer slot; only the thread holding the listener lock touches a slot's buffers. */
+std::array<PeerBuffers, client::network::kBapConnectionCount> g_peerBuffers;
 
 /** Makes one socket nonblocking. @return True when it can no longer block its caller. */
 [[nodiscard]] bool make_nonblocking(SOCKET socket) noexcept {
@@ -104,10 +106,11 @@ void receive_peer(Peer& peer) noexcept {
     if (free == 0) {
         return;
     }
-    const int received = recv(peer.socket,
-                              reinterpret_cast<char*>(peer.stream.data() + peer.streamSize),
-                              static_cast<int>(free),
-                              0);
+    const int received =
+        recv(peer.socket,
+             reinterpret_cast<char*>(buffers(peer).stream.data() + peer.streamSize),
+             static_cast<int>(free),
+             0);
     if (received > 0) {
         if (peer.streamSize == 0) {
             peer.inputStartedTick = peer.serviceTick;
@@ -131,10 +134,11 @@ void receive_peer(Peer& peer) noexcept {
     }
     const std::size_t remaining = peer.outputSize - peer.outputOffset;
     const core::network::ServiceSocketScope replySocket(peer.socket);
-    const int sent = send(peer.socket,
-                          reinterpret_cast<const char*>(peer.output.data() + peer.outputOffset),
-                          static_cast<int>(remaining),
-                          0);
+    const int sent =
+        send(peer.socket,
+             reinterpret_cast<const char*>(buffers(peer).output.data() + peer.outputOffset),
+             static_cast<int>(remaining),
+             0);
     if (sent > 0) {
         return advance_output(peer, static_cast<std::size_t>(sent));
     }
@@ -256,6 +260,11 @@ void service_peer(
 }
 
 } // namespace
+
+/** A peer's connection id is its slot plus one. */
+PeerBuffers& buffers(const Peer& peer) noexcept {
+    return g_peerBuffers[peer.connectionId - 1];
+}
 
 /** Starts the nonblocking loopback listener on one port. */
 bool initialize_on_port(std::uint16_t port) noexcept {
