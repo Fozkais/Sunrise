@@ -86,6 +86,33 @@ constexpr std::uint32_t kClassRow = 0x808074FAU;
 constexpr std::size_t kUseConditionPointer = 24;
 constexpr std::uint32_t kUseConditionClass = 0x80802980U;
 
+/** Set when the installed data refuses the reward tables or graph; no retry can change that. */
+bool g_rewardsUnsupported = false;
+
+/** Logs one refused reward load, sizing or publication. */
+void report_refusal(const char* reason) noexcept {
+    core::log::writef(core::log::Channel::client,
+                      core::log::Level::warn,
+                      "ev=pkg stage=rewards result=fail reason=%s",
+                      reason);
+}
+
+/** Logs a refusal the installed data decides and settles the domain once. */
+void settle_unsupported(const char* reason) noexcept {
+    report_refusal(reason);
+    if (!g_rewardsUnsupported) {
+        g_rewardsUnsupported = true;
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::warn,
+                         "ev=pkg stage=rewards result=unsupported");
+    }
+}
+
+/** An unread item row keeps a zero hash. */
+[[nodiscard]] bool item_read(std::span<const domain::Item> items, std::uint16_t index) noexcept {
+    return index < items.size() && items[index].definitionHash != 0;
+}
+
 /** Appends within a bank's capacity; an allocation failure is refused rather than thrown. */
 template <typename T> bool append(std::vector<T>& bank, T value, std::size_t capacity) noexcept {
     if (bank.size() >= capacity) {
@@ -153,10 +180,20 @@ bool read_class_flag(std::span<const std::byte> blob, std::uint16_t& output) noe
 
 } // namespace
 
-bool RewardBuild::entry(std::span<const std::byte> blob, std::size_t at) noexcept {
+/** @return True when the reward graph is published or can never be. */
+bool reward_definitions_settled() noexcept {
+    return state::build_data::reward_definitions_ready() || g_rewardsUnsupported;
+}
+
+bool RewardBuild::entry(std::span<const std::byte> blob,
+                        std::size_t at,
+                        const char*& fullBank) noexcept {
     domain::Entry out{};
+    bool instructionsFull = false;
     if (!read_reward_entry(blob, at, out)
-        || !conditions.read(blob, at + kEntryConditionOffset, instructions_, out.condition)) {
+        || !conditions.read(
+            blob, at + kEntryConditionOffset, instructions_, out.condition, instructionsFull)) {
+        fullBank = instructionsFull ? "instruction_capacity" : nullptr;
         return false;
     }
     out.supplementalMissing = supplementalMissing_ && out.supplementalIndex != domain::kAbsent;
@@ -170,18 +207,28 @@ bool RewardBuild::entry(std::span<const std::byte> blob, std::size_t at) noexcep
     for (std::size_t i = 0; i < rows.count; ++i) {
         const auto offset = rows.dataOffset + i * kModifierStride;
         domain::Modifier modifier{};
-        if (!conditions.read(blob, offset, instructions_, modifier.condition)
+        if (!conditions.read(blob, offset, instructions_, modifier.condition, instructionsFull)
             || !tables::read(blob, offset + kModifierValueIndexOffset, modifier.valueIndex)
             || !tables::read(blob, offset + kModifierValueOffset, modifier.value)
-            || !std::isfinite(modifier.value)
-            || !append(modifiers_, modifier, domain::kModifierCapacity)) {
+            || !std::isfinite(modifier.value)) {
+            fullBank = instructionsFull ? "instruction_capacity" : nullptr;
+            return false;
+        }
+        if (modifiers_.size() >= domain::kModifierCapacity) {
+            fullBank = "modifier_capacity";
+            return false;
+        }
+        if (!append(modifiers_, modifier, domain::kModifierCapacity)) {
             return false;
         }
     }
     std::array<domain::SocketOverride, domain::kSocketsPerItem> overrides{};
     std::size_t count = 0;
-    if (!read_reward_sockets(blob, at + kEntrySocketsOffset, overrides, count)
-        || count > domain::kSocketOverrideCapacity - sockets_.size()) {
+    if (!read_reward_sockets(blob, at + kEntrySocketsOffset, overrides, count)) {
+        return false;
+    }
+    if (count > domain::kSocketOverrideCapacity - sockets_.size()) {
+        fullBank = "socket_capacity";
         return false;
     }
     out.sockets = {static_cast<std::uint32_t>(sockets_.size()), static_cast<std::uint32_t>(count)};
@@ -190,6 +237,10 @@ bool RewardBuild::entry(std::span<const std::byte> blob, std::size_t at) noexcep
             || !append(sockets_, overrides[i], domain::kSocketOverrideCapacity)) {
             return false;
         }
+    }
+    if (entries_.size() >= domain::kEntryCapacity) {
+        fullBank = "entry_capacity";
+        return false;
     }
     return append(entries_, out, domain::kEntryCapacity);
 }
@@ -251,19 +302,24 @@ bool RewardConditions::load(const reader::Source& source,
     maps_ = &maps;
     load_class_flags(source, scratch, root);
     // Shared expressions are expanded before the runtime evaluates reward conditions.
-    return root_table(source, scratch, root, kFlagSlot, flags_, kFlagTableClass)
-           && tables::read_array(
-               flags_, tables::kTableArrayDescriptor, kFlagRowClass, kBindingStride, flagRows_)
-           && root_table(source, scratch, root, kValueSlot, values_, kValueTableClass)
-           && tables::read_array(
-               values_, tables::kTableArrayDescriptor, kValueRowClass, kBindingStride, valueRows_)
-           && root_table(
-               source, scratch, root, kExpressionSlot, expressions_, kExpressionTableClass)
-           && tables::read_array(expressions_,
-                                 tables::kTableArrayDescriptor,
-                                 kExpressionRowClass,
-                                 kExpressionRowStride,
-                                 expressionRows_);
+    loaded_ =
+        root_table(source, scratch, root, kFlagSlot, flags_, kFlagTableClass)
+        && tables::read_array(
+            flags_, tables::kTableArrayDescriptor, kFlagRowClass, kBindingStride, flagRows_)
+        && root_table(source, scratch, root, kValueSlot, values_, kValueTableClass)
+        && tables::read_array(
+            values_, tables::kTableArrayDescriptor, kValueRowClass, kBindingStride, valueRows_)
+        && root_table(source, scratch, root, kExpressionSlot, expressions_, kExpressionTableClass)
+        && tables::read_array(expressions_,
+                              tables::kTableArrayDescriptor,
+                              kExpressionRowClass,
+                              kExpressionRowStride,
+                              expressionRows_);
+    return loaded_;
+}
+
+bool RewardConditions::loaded() const noexcept {
+    return loaded_;
 }
 
 bool RewardConditions::bind(std::uint32_t native,
@@ -357,9 +413,12 @@ bool RewardConditions::append_expression(std::span<const std::byte> blob,
 bool RewardConditions::read(std::span<const std::byte> blob,
                             std::size_t at,
                             std::vector<domain::Instruction>& bank,
-                            domain::Range& range) const noexcept {
+                            domain::Range& range,
+                            bool& bankFull) const noexcept {
     const auto first = bank.size();
+    bankFull = false;
     if (!append_expression(blob, at, bank, 0)) {
+        bankFull = bank.size() >= domain::kInstructionCapacity;
         bank.resize(first);
         return false;
     }
@@ -377,12 +436,15 @@ bool RewardConditions::read_list(std::span<const std::byte> blob,
     if (!tables::read_array(blob, at, kConditionClass, tables::kUnlockExpressionFieldSize, rows)) {
         return false;
     }
+    // The row's condition capacity below bounds this bank.
+    bool bankFull = false;
     for (std::size_t i = 0; i < rows.count; ++i) {
         domain::Range expression{};
         if (!read(blob,
                   rows.dataOffset + i * tables::kUnlockExpressionFieldSize,
                   instructions,
-                  expression)
+                  expression,
+                  bankFull)
             || expression.count == 0) {
             return false;
         }
@@ -441,12 +503,17 @@ bool RewardBuild::load(const reader::Source& source,
     std::vector<std::byte> blob;
     tables::Array rows{};
     std::uint32_t supplementalTag = 0;
-    if (!tables::slot_tag(root, kSupplementalRewardSlot, supplementalTag)
-        || !conditions.load(source, scratch, root, maps)
+    // Conditions load first; the season pass binds through them even if the pools are refused.
+    if (!conditions.load(source, scratch, root, maps)
+        || !tables::slot_tag(root, kSupplementalRewardSlot, supplementalTag)
         || !root_table(source, scratch, root, kPoolSlot, blob, kPoolClass)
         || !tables::read_array(
-            blob, tables::kTableArrayDescriptor, kPoolRowClass, kPoolStride, rows)
-        || rows.count == 0 || rows.count > domain::kPoolCapacity) {
+            blob, tables::kTableArrayDescriptor, kPoolRowClass, kPoolStride, rows)) {
+        settle_unsupported("tables");
+        return false;
+    }
+    if (rows.count == 0 || rows.count > domain::kPoolCapacity) {
+        settle_unsupported("pool_count");
         return false;
     }
     supplementalMissing_ = supplementalTag == kAbsentTableTag;
@@ -463,7 +530,13 @@ bool RewardBuild::load(const reader::Source& source,
                 const auto beforeInstructions = instructions_.size();
                 const auto beforeModifiers = modifiers_.size();
                 const auto beforeSockets = sockets_.size();
-                if (!entry(blob, members.dataOffset + j * kEntryStride)) {
+                const char* fullBank = nullptr;
+                if (!entry(blob, members.dataOffset + j * kEntryStride, fullBank)) {
+                    // Skipping past a full bank would publish a pool missing some of its entries.
+                    if (fullBank != nullptr) {
+                        settle_unsupported(fullBank);
+                        return false;
+                    }
                     instructions_.resize(beforeInstructions);
                     modifiers_.resize(beforeModifiers);
                     sockets_.resize(beforeSockets);
@@ -476,14 +549,19 @@ bool RewardBuild::load(const reader::Source& source,
             ++skipped;
         }
         if (!append(pools_, pool, domain::kPoolCapacity)) {
+            report_refusal("pool_storage");
             return false;
         }
     }
     core::log::writef(core::log::Channel::client,
                       skipped == 0 ? core::log::Level::info : core::log::Level::warn,
-                      "ev=pkg stage=rewards pools=%zu entries=%zu skipped=%zu",
+                      "ev=pkg stage=rewards pools=%zu entries=%zu instructions=%zu modifiers=%zu "
+                      "sockets=%zu skipped=%zu",
                       pools_.size(),
                       entries_.size(),
+                      instructions_.size(),
+                      modifiers_.size(),
+                      sockets_.size(),
                       skipped);
     loaded_ = true;
     return true;
@@ -504,9 +582,9 @@ bool RewardBuild::read_item(std::uint32_t hash,
         domain::Instruction flag{};
         if (!conditions.bind(tables::kUnlockReadFlagOpcode, acquired, flag)
             || !unlocks::valid(flag)) {
-            return false;
-        }
-        if (flag.bank == unlocks::Bank::account) {
+            // The grant is kept; only its acquisition flag is unknown.
+            ++unboundAcquiredFlags_;
+        } else if (flag.bank == unlocks::Bank::account) {
             item.acquiredFlag = static_cast<std::uint16_t>(flag.operand);
         }
     }
@@ -537,13 +615,20 @@ bool RewardBuild::read_item(std::uint32_t hash,
 }
 
 bool RewardBuild::begin_items(std::size_t count) noexcept {
+    unboundAcquiredFlags_ = 0;
+    // A refused load has already reported itself.
+    if (!loaded_) {
+        return false;
+    }
     try {
-        if (!loaded_ || count == 0 || count > domain::kItemCapacity) {
+        if (count == 0 || count > domain::kItemCapacity) {
+            report_refusal("item_storage");
             return false;
         }
         items_.assign(count, {});
         return true;
     } catch (...) {
+        report_refusal("item_storage");
         return false;
     }
 }
@@ -561,6 +646,12 @@ bool RewardBuild::publish() noexcept {
     if (!loaded_) {
         return false;
     }
+    // Cleared first so the entry pass also drops draws of a cleared wrapper.
+    for (auto& item : items_) {
+        if (item.poolIndex != domain::kAbsent && item.poolIndex >= pools_.size()) {
+            item = {};
+        }
+    }
     std::size_t write = 0;
     std::size_t socketWrite = 0;
     for (auto& pool : pools_) {
@@ -568,11 +659,13 @@ bool RewardBuild::publish() noexcept {
         pool.entries.first = static_cast<std::uint32_t>(write);
         for (std::size_t i = range.first; i < range.first + range.count; ++i) {
             const auto& row = entries_[i];
-            bool valid = (row.itemIndex == domain::kAbsent || row.itemIndex < items_.size())
+            bool valid = (row.itemIndex == domain::kAbsent || item_read(items_, row.itemIndex))
                          && (row.poolIndex == domain::kAbsent || row.poolIndex < pools_.size());
             for (const auto& socket :
                  std::span(sockets_).subspan(row.sockets.first, row.sockets.count)) {
-                valid &= domain::valid_socket(socket, items_.size());
+                valid &=
+                    domain::valid_socket(socket, items_.size())
+                    && (socket.plugItem == domain::kAbsent || item_read(items_, socket.plugItem));
             }
             if (valid) {
                 auto retained = row;
@@ -586,15 +679,28 @@ bool RewardBuild::publish() noexcept {
         }
         pool.entries.count = static_cast<std::uint32_t>(write) - pool.entries.first;
     }
+    const std::size_t droppedEntries = entries_.size() - write;
     entries_.resize(write);
     sockets_.resize(socketWrite);
-    for (auto& item : items_) {
-        if (item.poolIndex != domain::kAbsent && item.poolIndex >= pools_.size()) {
-            item = {};
-        }
+    if (unboundAcquiredFlags_ != 0 || droppedEntries != 0) {
+        core::log::writef(core::log::Channel::client,
+                          core::log::Level::warn,
+                          "ev=pkg stage=rewards result=partial unbound_acquired_flags=%zu "
+                          "dropped_entries=%zu",
+                          unboundAcquiredFlags_,
+                          droppedEntries);
     }
-    return state::build_data::publish_reward_definitions(
-        {pools_, entries_, items_, instructions_, modifiers_, sockets_});
+    const domain::View graph{pools_, entries_, items_, instructions_, modifiers_, sockets_};
+    if (!state::build_data::valid_reward_definitions(graph)) {
+        settle_unsupported("graph");
+        return false;
+    }
+    // A cache write can still fail, so this stays retryable.
+    if (!state::build_data::publish_reward_definitions(graph)) {
+        report_refusal("publish");
+        return false;
+    }
+    return true;
 }
 
 } // namespace sunrise::client::content::items::packages

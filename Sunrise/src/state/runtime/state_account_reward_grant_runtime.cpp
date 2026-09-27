@@ -105,12 +105,12 @@ apply_reward_sockets(const item_details::Definition& detail,
     return true;
 }
 
-[[nodiscard]] bool prepare_resolved_reward(const rewards::Result& resolved,
-                                           PendingRecordRewardGrant& mutation,
-                                           const char** refusal) noexcept {
+[[nodiscard]] RewardPreparation prepare_resolved_reward(const rewards::Result& resolved,
+                                                        PendingRecordRewardGrant& mutation,
+                                                        const char** refusal) noexcept {
     std::array<DirectRecordReward, kRecordRewardGrantCapacity> rows{};
     if (resolved.count > rows.size()) {
-        return false;
+        return RewardPreparation::unresolvable;
     }
     for (std::size_t i = 0; i < resolved.count; ++i) {
         const auto& grant = resolved.grants[i];
@@ -121,6 +121,15 @@ apply_reward_sockets(const item_details::Definition& detail,
     }
     return prepare_record_reward_grant(
         std::span(rows).first(resolved.count), kUnclaimedRecordIndex, mutation, refusal);
+}
+
+/** Classifies a catalog refusal: a verdict unless a catalog was cleared meanwhile. */
+[[nodiscard]] RewardPreparation catalog_refusal(const char*& reason) noexcept {
+    if (build_data::item_definitions_ready() && build_data::reward_definitions_ready()) {
+        return RewardPreparation::unresolvable;
+    }
+    reason = "not_ready";
+    return RewardPreparation::deferred;
 }
 
 /** Wrappers and direct account perks bypass quest initialization. */
@@ -258,7 +267,7 @@ bool prepare_season_pass_reward(std::uint16_t rewardIndex,
         return false;
     }
     reason = "reward_placement";
-    if (!prepare_resolved_reward(resolved, mutation.grant, &reason)) {
+    if (prepare_resolved_reward(resolved, mutation.grant, &reason) != RewardPreparation::prepared) {
         return false;
     }
     reason = nullptr;
@@ -294,19 +303,24 @@ ItemGrantRoute item_grant_route(std::uint16_t itemIndex) noexcept {
                : ItemGrantRoute::unavailable;
 }
 
-bool prepare_item_reward(std::uint16_t itemIndex,
-                         std::uint32_t quantity,
-                         std::uint64_t seed,
-                         PendingRecordRewardGrant& mutation,
-                         const char** refusal) noexcept {
+RewardPreparation prepare_item_reward(std::uint16_t itemIndex,
+                                      std::uint32_t quantity,
+                                      std::uint64_t seed,
+                                      PendingRecordRewardGrant& mutation,
+                                      const char** refusal) noexcept {
     const char* unused = nullptr;
     auto& reason = refusal != nullptr ? *refusal : unused;
-    reason = "item_definition";
+    reason = "not_ready";
     mutation = {};
+    // Unpublished domains decide nothing; retry later.
+    if (!build_data::item_definitions_ready() || !build_data::reward_definitions_ready()) {
+        return RewardPreparation::deferred;
+    }
+    reason = "item_definition";
     const std::lock_guard lock(investment::store::g_mutex);
     build_data::items::Definition item{};
     if (!build_data::find_item_definition_index(itemIndex, item)) {
-        return false;
+        return catalog_refusal(reason);
     }
     reason = "selected_character";
     const AccountState account = account_snapshot();
@@ -314,21 +328,17 @@ bool prepare_item_reward(std::uint16_t itemIndex,
     unlocks::Table flags{};
     if (character >= account.characterCount
         || !investment::store::read_unlocks(flags, static_cast<int>(character))) {
-        return false;
+        return RewardPreparation::deferred;
     }
     rewards::Result resolved{};
     if (!rewards::resolve({flags, account.characters[character].characterClass, seed, &reason},
                           itemIndex,
                           quantity,
                           resolved)) {
-        return false;
+        return catalog_refusal(reason);
     }
     reason = "reward_placement";
-    if (!prepare_resolved_reward(resolved, mutation, &reason)) {
-        return false;
-    }
-    reason = nullptr;
-    return true;
+    return prepare_resolved_reward(resolved, mutation, &reason);
 }
 
 bool preview_reward_unlocks(const PendingRecordRewardGrant& mutation,
@@ -502,23 +512,30 @@ namespace {
 } // namespace
 
 /** Prepares every reward over one cumulative account view. */
-bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
-                                 std::uint16_t claimedRecordIndex,
-                                 PendingRecordRewardGrant& mutation,
-                                 const char** refusal) noexcept {
+RewardPreparation prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
+                                              std::uint16_t claimedRecordIndex,
+                                              PendingRecordRewardGrant& mutation,
+                                              const char** refusal) noexcept {
     const char* unused = nullptr;
     auto& reason = refusal != nullptr ? *refusal : unused;
     reason = "reward_count";
     mutation = {};
     if (rewards.empty() || rewards.size() > mutation.rewards.size()) {
-        return false;
+        return RewardPreparation::unresolvable;
+    }
+    reason = "not_ready";
+    // The loadout check needs these domains, so nothing is decided before they publish.
+    if (!build_data::item_definitions_ready() || !build_data::configured_item_details_ready()
+        || !build_data::inventory_bucket_descriptors_ready()
+        || !build_data::socket_entry_lists_ready()) {
+        return RewardPreparation::deferred;
     }
     reason = "account_state";
     const AccountState account = account_snapshot();
     const std::size_t characterIndex = selected_character_index(account);
     if (!account::valid(account) || !valid_profile_inventory(account)
         || characterIndex >= account.characterCount) {
-        return false;
+        return RewardPreparation::deferred;
     }
 
     AccountState working = account;
@@ -532,25 +549,27 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
             || !build_data::find_item_definition_index(requested.itemDefinitionIndex, item)
             || item.questInitialization.scope
                    != build_data::items::QuestInitialization::Scope::none) {
-            return false;
+            return RewardPreparation::unresolvable;
         }
         PreparedRecordReward prepared{};
         prepared.definitionHash = item.definitionHash;
         prepared.quantity = requested.quantity;
         if (requested.acquireUnlock) {
             reason = "acquisition_flag";
+            // Only a resolved reward asks for its flag, so the graph is published.
             build_data::rewards::Item source{};
             if (!build_data::find_reward_item(item.definitionIndex, source)
                 || source.definitionHash != item.definitionHash) {
-                return false;
+                return RewardPreparation::unresolvable;
             }
             prepared.acquiredFlag = source.acquiredFlag;
             if (source.acquiredFlag != build_data::rewards::kAbsent) {
                 std::int32_t before = 0;
+                // The saved flag refuses here, not the definition.
                 if (!investment::store::read_unlock(
                         investment::store::Bank::accountFlags, source.acquiredFlag, before)
                     || before < 0 || before > unlocks::kFlagSet) {
-                    return false;
+                    return RewardPreparation::deferred;
                 }
                 prepared.previousFlag = static_cast<std::uint8_t>(before);
             }
@@ -559,7 +578,7 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
             reason = "perk_acquisition";
             if (prepared.acquiredFlag == build_data::rewards::kAbsent || requested.quantity != 1
                 || !requested.sockets.empty()) {
-                return false;
+                return RewardPreparation::unresolvable;
             }
             prepared.kind = RecordRewardKind::accountUnlock;
             prepared.afterQuantity = 1;
@@ -571,13 +590,13 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
             || detail.definitionIndex != item.definitionIndex
             || detail.definitionHash != item.definitionHash || detail.bucketId != item.bucketId
             || !build_data::find_inventory_bucket_descriptor(item.bucketId, bucket)) {
-            return false;
+            return RewardPreparation::unresolvable;
         }
         reason = "duplicate_stack";
         if (detail.instancedDefinitionState == item_details::InstancedDefinitionState::stackable) {
             for (std::size_t prior = 0; prior < index; ++prior) {
                 if (mutation.rewards[prior].definitionHash == item.definitionHash) {
-                    return false;
+                    return RewardPreparation::unresolvable;
                 }
             }
         }
@@ -587,14 +606,14 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
             && (bucket.arraySelector != inventory_buckets::ArraySelector::character
                 || detail.instancedDefinitionState
                        != item_details::InstancedDefinitionState::instanced)) {
-            return false;
+            return RewardPreparation::unresolvable;
         }
         reason = "inventory_destination";
         if (bucket.arraySelector == inventory_buckets::ArraySelector::profile) {
             reason = "profile_capacity";
-            if (detail.instancedDefinitionState
-                != item_details::InstancedDefinitionState::stackable) {
-                return false;
+            if (detail.instancedDefinitionState != item_details::InstancedDefinitionState::stackable
+                || requested.quantity > detail.maxStackSize) {
+                return RewardPreparation::unresolvable;
             }
             PendingProfileItemAcquisition staged{};
             const bool actionSource =
@@ -607,7 +626,7 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
                                                    requested.quantity,
                                                    {.direct = true},
                                                    staged)) {
-                return false;
+                return RewardPreparation::deferred;
             }
             working.profileItems = staged.afterItems;
             working.profileItemCount = staged.afterItemCount;
@@ -622,20 +641,20 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
                           == item_details::InstancedDefinitionState::instanced) {
             reason = "instance_quantity";
             if (requested.quantity != 1) {
-                return false;
+                return RewardPreparation::unresolvable;
             }
             reason = "instance_capacity";
             PendingItemAcquisition staged{};
             if (!finalize_item_acquisition(
                     working, working, item.definitionHash, false, {.direct = true}, staged)) {
-                return false;
+                return RewardPreparation::deferred;
             }
             if (!apply_reward_sockets(
                     detail,
                     requested.sockets,
                     staged.afterCharacter.inventory.values[staged.inventoryIndex].sockets,
                     &reason)) {
-                return false;
+                return RewardPreparation::unresolvable;
             }
             working.characters[characterIndex] = staged.afterCharacter;
             prepared.instanceSoid = staged.acquiredInstanceSoid;
@@ -651,10 +670,12 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
                    && !detail.equipmentSlot.has_value()) {
             reason = "character_stack_capacity";
             CharacterState& character = working.characters[characterIndex];
-            if (requested.quantity > detail.maxStackSize
-                || character.nextInventorySerial
-                       >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
-                return false;
+            if (requested.quantity > detail.maxStackSize) {
+                return RewardPreparation::unresolvable;
+            }
+            if (character.nextInventorySerial
+                >= static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())) {
+                return RewardPreparation::deferred;
             }
             std::size_t stackIndex = character.stacks.count;
             for (std::size_t candidate = 0; candidate < character.stacks.count; ++candidate) {
@@ -668,7 +689,7 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
                 || (!appended
                     && character.stacks.values[stackIndex].quantity
                            > detail.maxStackSize - requested.quantity)) {
-                return false;
+                return RewardPreparation::deferred;
             }
             auto& stack = character.stacks.values[stackIndex];
             if (appended) {
@@ -682,16 +703,17 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
             prepared.mutationSerial = stack.mutationSerial;
             prepared.kind = RecordRewardKind::characterStack;
         } else {
-            return false;
+            return RewardPreparation::unresolvable;
         }
         mutation.rewards[index] = prepared;
     }
 
     reason = "loadout";
+    // A full native bucket rejects the whole loadout; retry later.
     family4_loadout::ResolvedLoadout loadout{};
     if (!account::valid(working) || !valid_profile_inventory(working)
         || !family4_loadout::resolve(working, characterIndex, loadout)) {
-        return false;
+        return RewardPreparation::deferred;
     }
     mutation.beforeCharacter = account.characters[characterIndex];
     mutation.afterCharacter = working.characters[characterIndex];
@@ -706,7 +728,7 @@ bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
     mutation.rewardCount = rewards.size();
     reason = nullptr;
     mutation.prepared = true;
-    return true;
+    return RewardPreparation::prepared;
 }
 
 bool preview_record_reward_grant(const PendingRecordRewardGrant& mutation,

@@ -75,12 +75,20 @@ selected_character(const state::AccountState& account) noexcept {
     }
     const char* reason = "transaction";
     state::investment::store::Transaction transaction;
-    if (!pending || !transaction.ready() || request.quantity <= 0
-        || !state::prepare_item_reward(request.itemDefinitionIndex,
-                                       static_cast<std::uint32_t>(request.quantity),
-                                       seed,
-                                       *pending,
-                                       &reason)) {
+    if (!pending || !transaction.ready()) {
+        return fail(reason);
+    }
+    const auto preparation =
+        state::prepare_item_reward(request.itemDefinitionIndex,
+                                   static_cast<std::uint32_t>(request.quantity),
+                                   seed,
+                                   *pending,
+                                   &reason);
+    if (preparation == state::RewardPreparation::unresolvable) {
+        (void)bap::retire_world_reward(transaction, request, reason);
+        return false;
+    }
+    if (preparation != state::RewardPreparation::prepared) {
         return fail(reason);
     }
     queuez::RecordRewardGrant update{};
@@ -99,18 +107,20 @@ selected_character(const state::AccountState& account) noexcept {
                                                    scratch.framed,
                                                    framedSize)
         && framedSize != 0;
+    // Only a piggyback slot can be short; the grant waits for a full poll.
+    if (encoded && framedSize > response.size()) {
+        return fail("response_capacity");
+    }
     if (!state::commit_record_reward(*pending)) {
         return fail("inventory_commit");
     }
     if (!bap::complete_world_reward(request.id) || !transaction.commit()) {
         return fail("queue_commit");
     }
-    // A failed presentation still commits the prepared draw and retires its queue row.
-    if (!encoded || framedSize > response.size()) {
+    // No buffer fixes a failed stage or encode, so the grant commits and the row retires.
+    if (!encoded) {
         bap::arm_account_resync_everywhere();
-        return fail(!staged    ? "inventory_stage"
-                    : !encoded ? "inventory_encode"
-                               : "response_capacity");
+        return fail(!staged ? "inventory_stage" : "inventory_encode");
     }
     std::copy_n(scratch.framed.begin(), framedSize, response.begin());
     written = framedSize;
@@ -165,6 +175,12 @@ selected_character(const state::AccountState& account) noexcept {
                                                       scratch.framed,
                                                       framedSize)
         && framedSize != 0;
+    // Only a piggyback slot can be short; the grant waits for a full poll.
+    if (encoded && framedSize > response.size()) {
+        report_reward_refusal(
+            "world_acquisition", request.itemDefinitionIndex, "response_capacity");
+        return false;
+    }
     if (!state::commit_item_acquisition(pending) || !bap::complete_world_reward(request.id)
         || !transaction.commit()) {
         core::log::write(core::log::Channel::server,
@@ -172,13 +188,12 @@ selected_character(const state::AccountState& account) noexcept {
                          "ev=queuez stage=world_acquisition result=fail reason=commit");
         return false;
     }
-    if (!encoded || framedSize > response.size()) {
+    // No buffer fixes a failed stage or encode, so the grant commits and the row retires.
+    if (!encoded) {
         bap::arm_account_resync_everywhere();
         report_reward_refusal("world_acquisition",
                               request.itemDefinitionIndex,
-                              !staged    ? "inventory_stage"
-                              : !encoded ? "inventory_encode"
-                                         : "response_capacity");
+                              !staged ? "inventory_stage" : "inventory_encode");
         return false;
     }
     std::copy_n(scratch.framed.begin(), framedSize, response.begin());
@@ -230,6 +245,12 @@ selected_character(const state::AccountState& account) noexcept {
                                                                                scratch.framed,
                                                                                framedSize)
                          && framedSize != 0;
+    // Only a piggyback slot can be short; the grant waits for a full poll.
+    if (encoded && framedSize > response.size()) {
+        report_reward_refusal(
+            "world_profile_acquisition", request.itemDefinitionIndex, "response_capacity");
+        return false;
+    }
     if (!state::commit_profile_item_acquisition(pending) || !bap::complete_world_reward(request.id)
         || !transaction.commit()) {
         core::log::write(core::log::Channel::server,
@@ -237,13 +258,12 @@ selected_character(const state::AccountState& account) noexcept {
                          "ev=queuez stage=world_profile_acquisition result=fail reason=commit");
         return false;
     }
-    if (!encoded || framedSize > response.size()) {
+    // No buffer fixes a failed stage or encode, so the grant commits and the row retires.
+    if (!encoded) {
         bap::arm_account_resync_everywhere();
         report_reward_refusal("world_profile_acquisition",
                               request.itemDefinitionIndex,
-                              !staged    ? "inventory_stage"
-                              : !encoded ? "inventory_encode"
-                                         : "response_capacity");
+                              !staged ? "inventory_stage" : "inventory_encode");
         return false;
     }
     std::copy_n(scratch.framed.begin(), framedSize, response.begin());

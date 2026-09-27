@@ -404,6 +404,9 @@ publish_progression_definitions(std::span<const progressions::Definition> defini
  */
 [[nodiscard]] bool publish_season_pass(std::span<const season_pass::Reward> rewards) noexcept;
 
+/** Checks rows against the rules publish_season_pass applies to the whole list. */
+[[nodiscard]] bool valid_season_pass_rewards(std::span<const season_pass::Reward> rewards) noexcept;
+
 /**
  * Reads one season pass reward row.
  * @param rewardIndex Native reward-array index the opcode-2400 claim names.
@@ -425,6 +428,9 @@ publish_progression_definitions(std::span<const progressions::Definition> defini
  * @return True when the graph passes the checks and any needed cache write succeeds.
  */
 [[nodiscard]] bool publish_reward_definitions(rewards::View definitions) noexcept;
+
+/** Checks a reward graph against the rules publish_reward_definitions applies. */
+[[nodiscard]] bool valid_reward_definitions(rewards::View definitions) noexcept;
 
 /**
  * Reads one item's reward row.

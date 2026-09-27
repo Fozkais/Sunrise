@@ -16,6 +16,11 @@ bool publish_season_pass(std::span<const season_pass::Reward> rewards) noexcept 
            && transaction.finish(season_pass::replace(rewards), season_pass::clear);
 }
 
+/** Checks season pass rows against the catalog's publication rules. */
+bool valid_season_pass_rewards(std::span<const season_pass::Reward> rewards) noexcept {
+    return season_pass::valid(rewards);
+}
+
 /** Reads one season pass reward row. */
 bool find_season_pass_reward(std::uint16_t rewardIndex, season_pass::Reward& reward) noexcept {
     return season_pass::find(rewardIndex, reward);

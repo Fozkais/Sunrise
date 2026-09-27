@@ -141,7 +141,7 @@ struct Resolver {
         }
         double value = entry.weight;
         if (!definitions::fits(entry.modifiers, data.modifiers)) {
-            return false;
+            return refuse(context, "modifier_range");
         }
         for (const auto& modifier :
              data.modifiers.subspan(entry.modifiers.first, entry.modifiers.count)) {
@@ -160,7 +160,7 @@ struct Resolver {
             }
         }
         if (!std::isfinite(value) || value < 0) {
-            return false;
+            return refuse(context, "weight_shape");
         }
         if (value == 0) {
             return true;
@@ -175,7 +175,7 @@ struct Resolver {
             }
         } else if (entry.itemIndex != definitions::kAbsent) {
             if (entry.itemIndex >= data.items.size()) {
-                return false;
+                return refuse(context, "item_range");
             }
         } else if (entry.supplementalIndex == definitions::kAbsent) {
             return refuse(context, "reward_target");
@@ -189,12 +189,15 @@ struct Resolver {
                      std::size_t depth,
                      double& total) noexcept {
         total = 0;
-        if (depth >= definitions::kTraversalDepth || index >= data.pools.size()) {
-            return false;
+        if (depth >= definitions::kTraversalDepth) {
+            return refuse(context, "pool_depth");
+        }
+        if (index >= data.pools.size()) {
+            return refuse(context, "pool_range");
         }
         const auto range = data.pools[index].entries;
         if (!definitions::fits(range, data.entries)) {
-            return false;
+            return refuse(context, "entry_range");
         }
         for (const auto& entry : data.entries.subspan(range.first, range.count)) {
             double value = 0;
@@ -203,7 +206,7 @@ struct Resolver {
             }
             total += value;
         }
-        return std::isfinite(total);
+        return std::isfinite(total) || refuse(context, "weight_shape");
     }
 
     bool
@@ -235,8 +238,13 @@ struct Resolver {
         if (chosen->poolIndex != definitions::kAbsent) {
             // A pool reference selects one leaf; quantity belongs to that leaf.
             double childTotal = 0;
-            return pool_weight(chosen->poolIndex, category, depth + 1, childTotal) && childTotal > 0
-                   && draw(chosen->poolIndex, category, depth + 1, childTotal);
+            if (!pool_weight(chosen->poolIndex, category, depth + 1, childTotal)) {
+                return false;
+            }
+            if (childTotal == 0) {
+                return refuse(context, "empty_pool");
+            }
+            return draw(chosen->poolIndex, category, depth + 1, childTotal);
         }
         if (selectedCount == selectedEntries.size()) {
             return refuse(context, "reward_selection_capacity");
@@ -246,20 +254,29 @@ struct Resolver {
         if (chosen->itemIndex == definitions::kAbsent) {
             return true;
         }
-        if (chosen->quantity == 0 || chosen->quantity > kMaximumQuantity
-            || result.count == result.grants.size()
-            || !definitions::fits(chosen->sockets, data.sockets)) {
-            return false;
+        return append_grant(*chosen);
+    }
+
+    /** Appends the chosen leaf's item grant with the socket overrides its row carries. */
+    bool append_grant(const definitions::Entry& chosen) noexcept {
+        if (chosen.quantity == 0 || chosen.quantity > kMaximumQuantity) {
+            return refuse(context, "reward_quantity");
+        }
+        if (result.count == result.grants.size()) {
+            return refuse(context, "grant_capacity");
+        }
+        if (!definitions::fits(chosen.sockets, data.sockets)) {
+            return refuse(context, "socket_range");
         }
         auto& grant = result.grants[result.count++];
-        grant.itemIndex = chosen->itemIndex;
-        grant.quantity = static_cast<std::int32_t>(chosen->quantity);
-        if (chosen->sockets.count > grant.sockets.size()) {
-            return false;
+        grant.itemIndex = chosen.itemIndex;
+        grant.quantity = static_cast<std::int32_t>(chosen.quantity);
+        if (chosen.sockets.count > grant.sockets.size()) {
+            return refuse(context, "socket_capacity");
         }
-        grant.socketCount = chosen->sockets.count;
+        grant.socketCount = chosen.sockets.count;
         std::copy_n(
-            data.sockets.begin() + chosen->sockets.first, grant.socketCount, grant.sockets.begin());
+            data.sockets.begin() + chosen.sockets.first, grant.socketCount, grant.sockets.begin());
         return true;
     }
 };
@@ -270,11 +287,8 @@ bool resolve_item(definitions::View data,
                   std::uint32_t quantity,
                   Result& result) noexcept {
     result = {};
-    if (context.refusal != nullptr) {
-        *context.refusal = "reward_shape";
-    }
     if (itemIndex >= data.items.size() || quantity == 0 || quantity > kMaximumQuantity) {
-        return false;
+        return refuse(context, "reward_shape");
     }
     const auto& item = data.items[itemIndex];
     if (item.definitionHash == 0) {
@@ -288,16 +302,15 @@ bool resolve_item(definitions::View data,
         staged.grants[0].quantity = static_cast<std::int32_t>(quantity);
         staged.count = 1;
     } else {
-        if (quantity != 1 || item.selectionCount == 0
-            || item.selectionCount > item.selections.size()) {
-            return false;
+        if (quantity != 1) {
+            return refuse(context, "wrapper_quantity");
+        }
+        if (item.selectionCount == 0 || item.selectionCount > item.selections.size()) {
+            return refuse(context, "wrapper_selections");
         }
         Resolver resolver{data, context, staged, context.seed};
         for (std::size_t i = 0; i < item.selectionCount; ++i) {
             const auto& declared = item.selections[i];
-            if (declared.count > kDrawCapacity) {
-                return false;
-            }
             for (std::size_t j = 0; j < declared.count; ++j) {
                 double total = 0;
                 if (!resolver.pool_weight(item.poolIndex, declared.categoryHash, 0, total)) {

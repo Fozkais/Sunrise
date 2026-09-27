@@ -16,6 +16,11 @@ bool publish_reward_definitions(rewards::View definitions) noexcept {
            && transaction.finish(rewards::replace(definitions), rewards::clear);
 }
 
+/** Checks a reward graph against the catalog's publication rules. */
+bool valid_reward_definitions(rewards::View definitions) noexcept {
+    return rewards::valid(definitions);
+}
+
 /** Reads one item's reward row. */
 bool find_reward_item(std::uint16_t itemIndex, rewards::Item& item) noexcept {
     return rewards::find_item(itemIndex, item);

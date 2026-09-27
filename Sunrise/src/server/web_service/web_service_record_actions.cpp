@@ -99,8 +99,9 @@ prepare_record_reward(const middleware::web_service::Message& message,
             message, "storage", recordIndex, rewards[0].itemDefinitionIndex, rewards[0].quantity);
         return RecordRewardPreparation::failed;
     }
-    if (!state::prepare_record_reward_grant(
-            std::span(rewards).first(rewardCount), recordIndex, *grant)) {
+    if (state::prepare_record_reward_grant(
+            std::span(rewards).first(rewardCount), recordIndex, *grant)
+        != state::RewardPreparation::prepared) {
         clear_mutation(outcome);
         report_record_reward(
             message, "state", recordIndex, rewards[0].itemDefinitionIndex, rewards[0].quantity);

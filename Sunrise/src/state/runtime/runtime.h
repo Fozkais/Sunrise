@@ -265,6 +265,9 @@ struct PendingRecordRewardGrant {
     bool prepared{};
 };
 
+/** How one reward preparation ended. */
+enum class RewardPreparation : std::uint8_t { prepared, deferred, unresolvable };
+
 /** One uncommitted Season reward, the native row it will claim, and the seed of its draw. */
 struct PendingSeasonPassReward {
     PendingRecordRewardGrant grant{};
@@ -541,11 +544,11 @@ prepare_item_acquisition(std::uint16_t collectibleIndex,
  * @param seed Caller-drawn entropy for any wrapper draws.
  * @param refusal Receives a static reason on failure.
  */
-[[nodiscard]] bool prepare_item_reward(std::uint16_t itemIndex,
-                                       std::uint32_t quantity,
-                                       std::uint64_t seed,
-                                       PendingRecordRewardGrant& mutation,
-                                       const char** refusal = nullptr) noexcept;
+[[nodiscard]] RewardPreparation prepare_item_reward(std::uint16_t itemIndex,
+                                                    std::uint32_t quantity,
+                                                    std::uint64_t seed,
+                                                    PendingRecordRewardGrant& mutation,
+                                                    const char** refusal = nullptr) noexcept;
 /**
  * Prepares an eligible native pass row without writing its claim or acquisition flags.
  * @param seed Caller-drawn entropy; the commit replays the same draw from it.
@@ -567,12 +570,13 @@ prepare_item_acquisition(std::uint16_t collectibleIndex,
  * @param rewards Item rows the record grants.
  * @param claimedRecordIndex Record already claimed in the banks, or kUnclaimedRecordIndex.
  * @param mutation Receives the prepared grant.
- * @return True when every row fits the account after-image.
+ * @return Prepared when every row fits the account after-image.
  */
-[[nodiscard]] bool prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
-                                               std::uint16_t claimedRecordIndex,
-                                               PendingRecordRewardGrant& mutation,
-                                               const char** refusal = nullptr) noexcept;
+[[nodiscard]] RewardPreparation
+prepare_record_reward_grant(std::span<const DirectRecordReward> rewards,
+                            std::uint16_t claimedRecordIndex,
+                            PendingRecordRewardGrant& mutation,
+                            const char** refusal = nullptr) noexcept;
 
 /** Builds the full account after-image while a record reward remains current. */
 [[nodiscard]] bool preview_record_reward_grant(const PendingRecordRewardGrant& mutation,
@@ -776,8 +780,12 @@ inline constexpr std::uint16_t kArtifactUnlockProgressionIndex = 39;
 /** @return Seasonal XP published in the account progression bank. */
 [[nodiscard]] std::int32_t seasonal_experience() noexcept;
 
-/** Publishes every seasonal value the seeded XP and artifact ownership imply. */
-[[nodiscard]] bool seed_seasonal_progression() noexcept;
+/**
+ * Publishes every seasonal value the seeded XP and artifact ownership imply.
+ * @param accountObjectPublished Whether the caller's push carries the account object; earned-perk
+ *        flags reach the client only there, so otherwise the perk walk waits for an XP grant.
+ */
+[[nodiscard]] bool seed_seasonal_progression(bool accountObjectPublished) noexcept;
 
 /** @return One-based Season of Arrivals rank the published XP earns. */
 [[nodiscard]] std::uint16_t seasonal_rank() noexcept;

@@ -23,15 +23,18 @@ public:
                             middleware::content::packages::reader::Scratch& scratch,
                             std::span<const std::byte> root,
                             const SlotMaps& maps) noexcept;
+    /** @return True when the last load() succeeded. */
+    [[nodiscard]] bool loaded() const noexcept;
     /** Binds one native instruction; flag and value slots resolve to their saved bank. */
     [[nodiscard]] bool bind(std::uint32_t native,
                             std::uint32_t operand,
                             state::build_data::rewards::Instruction& instruction) const noexcept;
-    /** Appends one expanded expression to the bank; the bank is unchanged on failure. */
+    /** Appends one expanded expression; the bank is unchanged on failure. */
     [[nodiscard]] bool read(std::span<const std::byte> blob,
                             std::size_t at,
                             std::vector<state::build_data::rewards::Instruction>& bank,
-                            state::build_data::rewards::Range& range) const noexcept;
+                            state::build_data::rewards::Range& range,
+                            bool& bankFull) const noexcept;
     /** Expands a list of expressions into one program where every expression must hold. */
     [[nodiscard]] bool read_list(std::span<const std::byte> blob,
                                  std::size_t at,
@@ -48,6 +51,7 @@ private:
                           std::span<const std::byte> root) noexcept;
     std::array<std::uint16_t, state::kCharacterClassCount> classFlags_{};
     const SlotMaps* maps_{};
+    bool loaded_{};
     std::vector<std::byte> flags_;
     std::vector<std::byte> values_;
     std::vector<std::byte> expressions_;
@@ -60,7 +64,7 @@ private:
 class RewardBuild {
 public:
     RewardConditions conditions;
-    /** Reads every reward pool; entries that fail to read are skipped and counted. */
+    /** Reads every reward pool; unreadable entries are skipped, a full bank refuses the load. */
     [[nodiscard]] bool load(const middleware::content::packages::reader::Source& source,
                             middleware::content::packages::reader::Scratch& scratch,
                             std::span<const std::byte> root,
@@ -73,12 +77,15 @@ public:
     [[nodiscard]] bool publish() noexcept;
 
 private:
-    [[nodiscard]] bool entry(std::span<const std::byte> blob, std::size_t at) noexcept;
+    /** Appends one entry; fullBank names the bank that refused it, if any. */
+    [[nodiscard]] bool
+    entry(std::span<const std::byte> blob, std::size_t at, const char*& fullBank) noexcept;
     [[nodiscard]] bool read_item(std::uint32_t hash,
                                  std::span<const std::byte> blob,
                                  state::build_data::rewards::Item& item) noexcept;
     bool loaded_{};
     bool supplementalMissing_{};
+    std::size_t unboundAcquiredFlags_{};
     std::vector<state::build_data::rewards::Pool> pools_;
     std::vector<state::build_data::rewards::Entry> entries_;
     std::vector<state::build_data::rewards::Item> items_;

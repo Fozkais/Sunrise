@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "codec.h"
 
 namespace sunrise::state::build_data::cache::records {
@@ -5,6 +7,22 @@ namespace {
 
 /** Cache padding fields are always written as zero. */
 constexpr unsigned int kReservedFieldValue = 0;
+
+/** A condition slot past a pass row's count holds what a default instruction encodes to. */
+bool unused_condition(const RewardInstructionRecord& record) noexcept {
+    const rewards::Instruction unused{};
+    return record.opcode == static_cast<std::uint8_t>(unused.opcode)
+           && record.bank == static_cast<std::uint8_t>(unused.bank)
+           && record.reserved == kReservedFieldValue && record.operand == unused.operand;
+}
+
+/** A socket slot past a pass row's count holds what a default override encodes to. */
+bool unused_socket(const RewardSocketOverrideRecord& record) noexcept {
+    const rewards::SocketOverride unused{};
+    return record.socketType == unused.socketType && record.plugItem == unused.plugItem
+           && record.plugSet == unused.plugSet && record.rollSet == unused.rollSet
+           && record.selection == unused.selection;
+}
 
 } // namespace
 
@@ -117,10 +135,18 @@ bool encode(const season_pass::Reward& value, SeasonPassRewardRecord& record) no
     return true;
 }
 
-/** Decodes one season pass reward row after checking its padding. */
+/** Decodes one season pass reward row after checking its padding and unused slots. */
 bool decode(const SeasonPassRewardRecord& record, season_pass::Reward& value) noexcept {
     value = {};
-    if (record.reserved != decltype(record.reserved){}) {
+    if (record.reserved != decltype(record.reserved){}
+        || record.conditionCount > record.condition.size()
+        || record.socketCount > record.sockets.size()) {
+        return false;
+    }
+    const auto unusedConditions = std::span(record.condition).subspan(record.conditionCount);
+    const auto unusedSockets = std::span(record.sockets).subspan(record.socketCount);
+    if (!std::all_of(unusedConditions.begin(), unusedConditions.end(), unused_condition)
+        || !std::all_of(unusedSockets.begin(), unusedSockets.end(), unused_socket)) {
         return false;
     }
     value.itemHash = record.itemHash;
@@ -130,18 +156,12 @@ bool decode(const SeasonPassRewardRecord& record, season_pass::Reward& value) no
     value.requiredRank = record.requiredRank;
     value.socketCount = record.socketCount;
     value.conditionCount = record.conditionCount;
-    if (value.conditionCount > value.condition.size()) {
-        return false;
-    }
-    for (std::size_t i = 0; i < value.condition.size(); ++i) {
+    for (std::size_t i = 0; i < value.conditionCount; ++i) {
         if (!decode(record.condition[i], value.condition[i])) {
             return false;
         }
     }
-    if (value.socketCount > value.sockets.size()) {
-        return false;
-    }
-    for (std::size_t i = 0; i < value.sockets.size(); ++i) {
+    for (std::size_t i = 0; i < value.socketCount; ++i) {
         if (!decode(record.sockets[i], value.sockets[i])) {
             return false;
         }

@@ -17,14 +17,14 @@ inline constexpr std::uint16_t kAbsent = 0xFFFF;
 inline constexpr std::size_t kPoolCapacity = 4096;
 /** Item rows are dense over the installed item-definition table. */
 inline constexpr std::size_t kItemCapacity = items::kDefinitionCapacity;
-/**
- * The shipped build declares 10,549 entries, 14,185 condition instructions, 3,714 modifiers, and
- * 1,812 socket overrides. Each bank leaves room above that.
- */
-inline constexpr std::size_t kEntryCapacity = 32768;
-inline constexpr std::size_t kInstructionCapacity = 32768;
-inline constexpr std::size_t kModifierCapacity = 32768;
-inline constexpr std::size_t kSocketOverrideCapacity = 32768;
+/** The shipped build publishes 10,549 entries. The bank leaves room above that. */
+inline constexpr std::size_t kEntryCapacity = 16384;
+/** The shipped build publishes 14,185 expanded condition instructions, with room above that. */
+inline constexpr std::size_t kInstructionCapacity = 16384;
+/** The shipped build publishes 3,714 modifiers. The bank leaves room above that. */
+inline constexpr std::size_t kModifierCapacity = 4096;
+/** The shipped build publishes 1,812 socket overrides. The bank leaves room above that. */
+inline constexpr std::size_t kSocketOverrideCapacity = 2048;
 /** Reward overrides address the ordinary socket lanes an item's initial plugs fill. */
 inline constexpr std::size_t kSocketsPerItem = items::details::kInitialPlugCapacity;
 /** Category selections one wrapper declares. The most any shipped wrapper declares is four. */

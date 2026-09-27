@@ -235,10 +235,6 @@ inline constexpr std::size_t kProgressionRewardClaimSlotOffset = 20;
 /** Eligibility expressions and socket overrides carried by one progression reward. */
 inline constexpr std::size_t kProgressionRewardConditionsOffset = 24;
 inline constexpr std::size_t kProgressionRewardSocketsOffset = 40;
-/** Items a wrapper item opens into, two bytes each as an item-definition index. */
-inline constexpr std::size_t kGearsetItemField = 392;
-inline constexpr std::uint32_t kGearsetItemRowClass = 0x808087DBU;
-inline constexpr std::size_t kGearsetItemStride = 2;
 
 /** Expression that makes one collectible acquired, which a purchase or a grant sets. */
 inline constexpr std::size_t kCollectibleAcquiredExpressionField = 112;

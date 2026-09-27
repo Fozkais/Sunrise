@@ -3,7 +3,6 @@
 
 #include "../../../../core/logging/log.h"
 #include "../../../../middleware/content/packages/tables/field_reader.h"
-#include "../../../../state/build_data/season_pass/season_pass_catalog.h"
 #include "../../../../state/progression/season_pass_reward_catalog.h"
 #include "internal.h"
 #include "package_reward_build.h"
@@ -71,7 +70,8 @@ bool read_season_reward(Storage& storage,
     }
     reward.socketCount = static_cast<std::uint8_t>(socketCount);
     reward.conditionCount = static_cast<std::uint8_t>(conditionCount);
-    return domain::valid(std::span(&reward, 1))
+    // Checked per row so one refused row stays unavailable.
+    return state::build_data::valid_season_pass_rewards(std::span(&reward, 1))
            && std::all_of(reward.sockets.begin(),
                           reward.sockets.begin() + reward.socketCount,
                           [&itemRows](const state::build_data::rewards::SocketOverride& socket) {

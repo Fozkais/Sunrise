@@ -157,7 +157,7 @@ struct Storage {
                state::build_data::progressions::kStepCapacity>
         progressionSteps{};
     std::size_t progressionStepCount{};
-    /** Season pass reward rows and the wrapper items they grant. */
+    /** Season pass reward rows in native claim order. */
     std::array<state::build_data::season_pass::Reward,
                state::build_data::season_pass::kRewardCapacity>
         seasonPassRewards{};
@@ -205,6 +205,9 @@ struct Storage {
 
 /** @return True when the catalyst catalog is published or cannot exist on this executable. */
 [[nodiscard]] bool exotic_catalysts_settled() noexcept;
+
+/** @return True when the reward graph is published or can never be. */
+[[nodiscard]] bool reward_definitions_settled() noexcept;
 
 /** Adds one native definition index to the deduplicated request set. */
 void request(std::uint16_t definitionIndex, DetailRequests& requested) noexcept;
@@ -323,7 +326,7 @@ read_investment_constants(const reader::Source& source,
 /**
  * Reads one root's two unlock mapping tables into the pass slot maps.
  * @param source Package source.
- * @param storage Pass storage receiving the four maps.
+ * @param storage Pass storage receiving the five maps.
  * @param root Investment root bytes.
  * @return True when both account maps read. A character map may stay unmapped.
  */
@@ -378,7 +381,7 @@ read_investment_constants(const reader::Source& source,
                                       std::span<state::build_data::progressions::Step> steps,
                                       std::size_t& stepCount) noexcept;
 
-/** Reads the season pass reward list and the wrapper items it grants. */
+/** Reads the season pass reward list, keeping an unreadable row as an unavailable one. */
 [[nodiscard]] bool build_season_pass(const reader::Source& source,
                                      Storage& storage,
                                      std::span<const std::byte> root) noexcept;
