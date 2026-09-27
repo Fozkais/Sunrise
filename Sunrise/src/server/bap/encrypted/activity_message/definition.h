@@ -124,6 +124,11 @@ struct AuthorityPurgeIngress final {
     state::activity::SessionBinding binding{};
     std::uint64_t expectedSequence{};
     std::uint64_t sourceGeneration{};
+    /**
+     * Bubble a msg-33 abdication gave up when the purge answers one, or -1. The bubble is still
+     * released once the purge commits, only its entities are purged instead of claimed back.
+     */
+    std::int16_t abdicatedBubble{-1};
     bool pending{};
 };
 

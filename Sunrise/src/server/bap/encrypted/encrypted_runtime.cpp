@@ -552,6 +552,14 @@ bool consume(Session& session,
                         session, activityPlan->authorityPurge.expectedSequence + 1);
                     state::activity::bubble_authority::record_purge(
                         activityPlan->sessionId, activityPlan->authorityPurge.body.slots);
+                    // A purge answering an abdication still gives the bubble up; only its
+                    // entities are gone instead of waiting for a claim.
+                    if (activityPlan->authorityPurge.abdicatedBubble >= 0) {
+                        state::activity::bubble_authority::record_abdication(
+                            activityPlan->sessionId,
+                            static_cast<std::uint8_t>(
+                                activityPlan->authorityPurge.abdicatedBubble));
+                    }
                     server::gameplay::squad_entity_retirement::returned_slots(
                         session.activity.session,
                         session.activity.bindingGeneration,

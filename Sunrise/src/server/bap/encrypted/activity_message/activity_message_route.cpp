@@ -550,6 +550,14 @@ bool process(const ActivityClientBinding& binding,
         }
         return frame_only(binding, rosterDecode, adapter, request);
     case IngressAdapter::authorityAbdicate:
+        // Entities kept through a state change inside the bubble keep their list entries taken:
+        // the client then never builds those entries in the new state, and the hall's first boss
+        // spawns from one. Purged, they are all built again once the bubble is granted back.
+        if (core::settings::get().server.activation.purgeStateChangeEntities
+            && abdicates_state_change(request)) {
+            return prepare_authority_purge(
+                binding, rosterDecode, adapter, request, plan, hasTransaction);
+        }
         return prepare_authority_abdication(
             binding, rosterDecode, adapter, request, plan, hasTransaction);
     case IngressAdapter::peerLeave:

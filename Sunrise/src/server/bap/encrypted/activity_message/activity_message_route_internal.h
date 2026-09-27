@@ -134,6 +134,14 @@ diagnostic_status(const receipts::Framed& framed, bool incident) noexcept;
                                            bool& hasTransaction) noexcept;
 
 /**
+ * Whether a msg-33 abdication gives up the bubble the client's armed host teleport moves it in:
+ * a state change inside the bubble, such as the boarding cinematic to the ship's deck.
+ * @param request Validated owned svc8 envelope carrying msg 33.
+ * @return True when the abdicated bubble is the teleport target's own.
+ */
+[[nodiscard]] bool abdicates_state_change(const service::Request& request) noexcept;
+
+/**
  * Retains one exact msg-26 abandon or msg-33 abdication until its authenticated frame commits.
  * @param binding Exact ActivityClient generation owned by this link.
  * @param rosterDecode Last complete msg-5 identity map delivered on this same link.

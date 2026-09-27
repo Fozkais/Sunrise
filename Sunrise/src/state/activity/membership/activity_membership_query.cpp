@@ -324,6 +324,25 @@ bool host_teleport_armed(std::uint64_t sessionId) noexcept {
     return armed;
 }
 
+/** Reads the region the last host-named teleport sends the client to. */
+std::int32_t host_teleport_target(std::uint64_t sessionId) noexcept {
+    if (sessionId == kAbsentSessionId) {
+        return kAbsentSliceSetIndex;
+    }
+    std::int32_t target = kAbsentSliceSetIndex;
+    AcquireSRWLockShared(&runtime::storage::g_stateLock);
+    const ActivityState& state = runtime::storage::g_state.activity;
+    const std::size_t index = activity::transactions::find_session(state, sessionId);
+    if (index != kInvalidSessionSlot && selected_member(state.sessions[index]) != nullptr) {
+        const MembershipState& membership = *selected_member(state.sessions[index]);
+        if (membership.hasHostTeleport) {
+            target = membership.hostTeleport.sliceSetIndex;
+        }
+    }
+    ReleaseSRWLockShared(&runtime::storage::g_stateLock);
+    return target;
+}
+
 /** Reads the pending region the client last reported. */
 std::int32_t reported_region(std::uint64_t sessionId) noexcept {
     if (sessionId == kAbsentSessionId) {

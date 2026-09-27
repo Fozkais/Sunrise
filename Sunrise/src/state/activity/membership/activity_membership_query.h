@@ -168,6 +168,12 @@ void set_program_spawn_hold(std::uint64_t sessionId, bool held) noexcept;
 [[nodiscard]] bool host_teleport_armed(std::uint64_t sessionId) noexcept;
 
 /**
+ * @param sessionId Joined activity session.
+ * @return The region the last host-named teleport sends the client to, or -1 when none did.
+ */
+[[nodiscard]] std::int32_t host_teleport_target(std::uint64_t sessionId) noexcept;
+
+/**
  * Prepares a membership-revision advance so an already-applied snapshot can be corrected.
  * The client applies one update per revision and drops every repeat, so a body published with a
  * stale citizen advertisement can only be replaced at a new revision.

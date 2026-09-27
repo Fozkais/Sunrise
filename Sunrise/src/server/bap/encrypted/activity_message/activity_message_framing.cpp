@@ -25,6 +25,12 @@ namespace player_trigger_incident = middleware::bap::activity_message::player_tr
 namespace activity_sdk = state::activity_sdk;
 
 /**
+ * Reason a purge of abdicated entities carries: the one the client itself gives the entity it
+ * abandons as it leaves a state, which it purges when answered with it.
+ */
+constexpr std::int32_t kStateChangePurgeReason = 3;
+
+/**
  * Resolves the private link a public bubble's crossing belongs to.
  * One private link plays the bubble when the player is alone. A fireteam gives every member a
  * link on the same private activity, so the crossing goes to the reporting player's own link.
@@ -338,7 +344,8 @@ bool prepare_peer_leave(const ActivityClientBinding& binding,
 
 /**
  * A purge answer preserves the requesting client's complete mask and reason. An abandon (msg 26)
- * is answered the same way: the client tore those entities down.
+ * is answered the same way: the client tore those entities down. An abdication (msg 33) is
+ * answered with the abandon's reason, and the bubble it gives up is kept for the commit.
  */
 bool prepare_authority_purge(const ActivityClientBinding& binding,
                              const RosterDecodeMap& rosterDecode,
@@ -353,6 +360,12 @@ bool prepare_authority_purge(const ActivityClientBinding& binding,
         parsed = service::entity_authority::parse_abandon(request.payload, abandon);
         purge.mask = abandon.mask;
         purge.reason = abandon.reason;
+    } else if (adapter == IngressAdapter::authorityAbdicate) {
+        service::entity_authority::Release abdication{};
+        parsed = service::entity_authority::parse_abdicate(request.payload, abdication);
+        purge.mask = abdication.mask;
+        purge.reason = kStateChangePurgeReason;
+        plan.authorityPurge.abdicatedBubble = static_cast<std::int16_t>(abdication.selector);
     } else {
         parsed = service::entity_authority::parse_request_purge(request.payload, purge);
     }
@@ -380,6 +393,20 @@ bool prepare_authority_purge(const ActivityClientBinding& binding,
     plan.mutationDomain = MutationDomain::authorityPurge;
     hasTransaction = true;
     return true;
+}
+
+/** Whether a msg-33 abdication gives up the bubble an armed host teleport moves the client in. */
+bool abdicates_state_change(const service::Request& request) noexcept {
+    service::entity_authority::Release abdication{};
+    if (!service::entity_authority::parse_abdicate(request.payload, abdication)
+        || !state::activity::membership::host_teleport_armed(request.sessionId)) {
+        return false;
+    }
+    const std::int32_t target =
+        state::activity::membership::host_teleport_target(request.sessionId);
+    return target >= 0
+           && (target >> state::activity::bubble_authority::kSliceSetToBubbleShift)
+                  == static_cast<std::int32_t>(abdication.selector);
 }
 
 /** A valid abdication or abandon changes ownership only after its frame commits. */

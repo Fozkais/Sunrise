@@ -59,6 +59,14 @@ struct Settings {
      * hall's first boss spawns from such an object, destroyed as the boarding cinematic ends.
      */
     bool purgeAbandonedEntities{false};
+    /**
+     * Entities a client gives up (activity message 33) as a host teleport moves it to another
+     * state of the same bubble are purged on that client instead of claimed back. Kept, each one
+     * holds its list entry, and the client never builds that entry in the new state: the hall's
+     * first boss spawns from such an entry. Purged, the client builds them all again once the
+     * bubble is granted back. Off, they are claimed back as any other released entity.
+     */
+    bool purgeStateChangeEntities{true};
 };
 
 } // namespace sunrise::core::settings::server::activation
