@@ -263,7 +263,7 @@ void report_perk_refusal(std::size_t index, const char* reason) noexcept {
                       reason);
 }
 
-/** Set while a perk walk is owed to the next XP grant; only touched under g_mutex. */
+/** Set while a perk walk is owed; only touched under g_mutex. */
 bool g_perkWalkOwed = true;
 
 /** Earned perks set both flags in the transaction that publishes their qualifying rank. */
@@ -369,7 +369,7 @@ std::int32_t seasonal_experience() noexcept {
 }
 
 /** Publishes every seasonal value the seeded XP and artifact ownership imply. */
-bool seed_seasonal_progression(bool accountObjectPublished) noexcept {
+bool seed_seasonal_progression() noexcept {
     const std::int32_t experience = seasonal_experience();
     SaleRows rows{};
     std::size_t count = 0;
@@ -377,9 +377,6 @@ bool seed_seasonal_progression(bool accountObjectPublished) noexcept {
         return false;
     }
     investment::store::g_mutex.lock();
-    if (!accountObjectPublished) {
-        g_perkWalkOwed = true;
-    }
     investment::store::Transaction transaction;
     Family5State family;
     if (!transaction.ready() || !investment::store::read_family5(family)) {
@@ -410,10 +407,11 @@ bool seed_seasonal_progression(bool accountObjectPublished) noexcept {
     }
     const std::uint32_t mask = artifact_mask(rows, count);
     bool walked = false;
+    // A later character pick publishes only a selection patch, so only an owed walk runs here.
     const bool published =
         publish_experience_lanes(experience) && publish_artifact_locked(family, mask, experience)
         && investment::store::write_family5(family)
-        && (!accountObjectPublished || grant_progress_flags(walked)) && transaction.commit();
+        && (!g_perkWalkOwed || grant_progress_flags(walked)) && transaction.commit();
     if (published && walked) {
         g_perkWalkOwed = false;
     }

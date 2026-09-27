@@ -107,6 +107,7 @@ struct Resolver {
     std::array<const definitions::Entry*, kDrawCapacity> selectedEntries{};
     std::array<std::uint32_t, kDrawCapacity> selectedCategories{};
     std::size_t selectedCount{};
+    bool excludedByUnlocks{};
 
     double fraction() noexcept {
         // SplitMix64 makes a prepared seed replayable without shared random state.
@@ -137,6 +138,7 @@ struct Resolver {
             return false;
         }
         if (!enabled) {
+            excludedByUnlocks = true;
             return true;
         }
         double value = entry.weight;
@@ -163,6 +165,8 @@ struct Resolver {
             return refuse(context, "weight_shape");
         }
         if (value == 0) {
+            // A modifier can change this weight when the unlocks change.
+            excludedByUnlocks |= entry.modifiers.count != 0;
             return true;
         }
         if (entry.poolIndex != definitions::kAbsent) {
@@ -285,7 +289,8 @@ bool resolve_item(definitions::View data,
                   const Context& context,
                   std::uint16_t itemIndex,
                   std::uint32_t quantity,
-                  Result& result) noexcept {
+                  Result& result,
+                  bool& ineligible) noexcept {
     result = {};
     if (itemIndex >= data.items.size() || quantity == 0 || quantity > kMaximumQuantity) {
         return refuse(context, "reward_shape");
@@ -326,6 +331,7 @@ bool resolve_item(definitions::View data,
             }
         }
         if (staged.count == 0) {
+            ineligible = resolver.excludedByUnlocks;
             return refuse(context, "empty_reward");
         }
     }
@@ -344,25 +350,34 @@ bool eligible(std::span<const definitions::Instruction> instructions,
     return condition(instructions, context, result);
 }
 
-bool resolve(const Context& context,
-             std::uint16_t itemIndex,
-             std::uint32_t quantity,
-             Result& result) noexcept {
+Resolution resolve(const Context& context,
+                   std::uint16_t itemIndex,
+                   std::uint32_t quantity,
+                   Result& result) noexcept {
     struct Request {
         const Context& context;
         std::uint16_t item;
         std::uint32_t quantity;
         Result& result;
-    } request{context, itemIndex, quantity, result};
+        bool ineligible;
+    } request{context, itemIndex, quantity, result, false};
     result = {};
     if (context.refusal != nullptr) {
         *context.refusal = "reward_item";
     }
-    return build_data::read_reward_definitions(
-        &request, [](void* raw, definitions::View data) noexcept {
-            auto& value = *static_cast<Request*>(raw);
-            return resolve_item(data, value.context, value.item, value.quantity, value.result);
-        });
+    if (build_data::read_reward_definitions(&request,
+                                            [](void* raw, definitions::View data) noexcept {
+                                                auto& value = *static_cast<Request*>(raw);
+                                                return resolve_item(data,
+                                                                    value.context,
+                                                                    value.item,
+                                                                    value.quantity,
+                                                                    value.result,
+                                                                    value.ineligible);
+                                            })) {
+        return Resolution::resolved;
+    }
+    return request.ineligible ? Resolution::ineligible : Resolution::refused;
 }
 
 } // namespace sunrise::state::rewards

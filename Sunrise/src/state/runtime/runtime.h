@@ -780,12 +780,8 @@ inline constexpr std::uint16_t kArtifactUnlockProgressionIndex = 39;
 /** @return Seasonal XP published in the account progression bank. */
 [[nodiscard]] std::int32_t seasonal_experience() noexcept;
 
-/**
- * Publishes every seasonal value the seeded XP and artifact ownership imply.
- * @param accountObjectPublished Whether the caller's push carries the account object; earned-perk
- *        flags reach the client only there, so otherwise the perk walk waits for an XP grant.
- */
-[[nodiscard]] bool seed_seasonal_progression(bool accountObjectPublished) noexcept;
+/** Publishes every seasonal value the seeded XP and artifact ownership imply. */
+[[nodiscard]] bool seed_seasonal_progression() noexcept;
 
 /** @return One-based Season of Arrivals rank the published XP earns. */
 [[nodiscard]] std::uint16_t seasonal_rank() noexcept;

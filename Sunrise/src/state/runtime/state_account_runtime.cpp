@@ -241,8 +241,7 @@ bool set_selected_character(std::uint64_t characterSoid) noexcept {
         investment::store::g_session.selected[index] = candidate.characters[index].selected;
     }
     investment::store::g_mutex.unlock();
-    // The selection patch carries no account object, so earned perks wait for the next XP grant.
-    (void)seed_seasonal_progression(false);
+    (void)seed_seasonal_progression();
     return true;
 }
 

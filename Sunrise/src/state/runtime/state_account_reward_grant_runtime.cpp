@@ -174,10 +174,11 @@ enum class PassResolution { claim, replay };
         || !enabled) {
         return false;
     }
-    if (!rewards::resolve({flags, account.characters[character].characterClass, seed, reason},
-                          reward.itemIndex,
-                          reward.quantity,
-                          result)) {
+    if (rewards::resolve({flags, account.characters[character].characterClass, seed, reason},
+                         reward.itemIndex,
+                         reward.quantity,
+                         result)
+        != rewards::Resolution::resolved) {
         return false;
     }
     if (reward.socketCount != 0) {
@@ -331,10 +332,16 @@ RewardPreparation prepare_item_reward(std::uint16_t itemIndex,
         return RewardPreparation::deferred;
     }
     rewards::Result resolved{};
-    if (!rewards::resolve({flags, account.characters[character].characterClass, seed, &reason},
-                          itemIndex,
-                          quantity,
-                          resolved)) {
+    const auto resolution =
+        rewards::resolve({flags, account.characters[character].characterClass, seed, &reason},
+                         itemIndex,
+                         quantity,
+                         resolved);
+    // The saved unlocks can change, so an empty draw they caused is retried, not retired.
+    if (resolution == rewards::Resolution::ineligible) {
+        return RewardPreparation::deferred;
+    }
+    if (resolution != rewards::Resolution::resolved) {
         return catalog_refusal(reason);
     }
     reason = "reward_placement";

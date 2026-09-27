@@ -69,6 +69,10 @@ selected_character(const state::AccountState& account) noexcept {
         report_reward_refusal("world_publish", request.itemDefinitionIndex, reason);
         return false;
     };
+    // A draw is not retained, so it waits for a buffer its whole frame is sure to fit.
+    if (response.size() < scratch.framed.size()) {
+        return false;
+    }
     std::uint64_t seed = 0;
     if (!middleware::crypto::random::fill(std::as_writable_bytes(std::span(&seed, 1)))) {
         return fail("random_source");
@@ -107,10 +111,6 @@ selected_character(const state::AccountState& account) noexcept {
                                                    scratch.framed,
                                                    framedSize)
         && framedSize != 0;
-    // Only a piggyback slot can be short; the grant waits for a full poll.
-    if (encoded && framedSize > response.size()) {
-        return fail("response_capacity");
-    }
     if (!state::commit_record_reward(*pending)) {
         return fail("inventory_commit");
     }

@@ -34,10 +34,13 @@ struct Context {
                             const Context& context,
                             bool& result) noexcept;
 
+/** How one resolution ended; ineligible means the saved unlocks left nothing to draw. */
+enum class Resolution : std::uint8_t { resolved, ineligible, refused };
+
 /** Plans an acquisition without changing State; retains wrappers opened separately. */
-[[nodiscard]] bool resolve(const Context& context,
-                           std::uint16_t itemIndex,
-                           std::uint32_t quantity,
-                           Result& result) noexcept;
+[[nodiscard]] Resolution resolve(const Context& context,
+                                 std::uint16_t itemIndex,
+                                 std::uint32_t quantity,
+                                 Result& result) noexcept;
 
 } // namespace sunrise::state::rewards

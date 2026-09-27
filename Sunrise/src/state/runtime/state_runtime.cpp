@@ -300,8 +300,7 @@ bool initialize(void* module,
     ReleaseSRWLockExclusive(&runtime::storage::g_stateLock);
     secure_reset(*initialized);
     // The seeded banks decide every derived bar, gate and seasonal counter, so both run last.
-    // The login snapshot carries the account object, so the seed walks earned perks now.
-    (void)seed_seasonal_progression(true);
+    (void)seed_seasonal_progression();
     unlocks::records::seed();
     return transaction.commit();
 }
