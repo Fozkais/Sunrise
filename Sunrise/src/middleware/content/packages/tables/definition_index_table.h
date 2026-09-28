@@ -95,11 +95,8 @@ inline constexpr std::size_t kUnlockInstructionOperandOffset = 4;
 /** An expression field is a 64-bit count then a 64-bit self-relative offset. */
 inline constexpr std::size_t kUnlockExpressionFieldSize = 16;
 inline constexpr std::size_t kUnlockExpressionPointerOffset = 8;
-/**
- * Record and node field detection accepts a field only when every opcode is at most 20. This is a
- * detection bound, not the opcode range: installed reward conditions also use opcode 22.
- */
-inline constexpr std::uint32_t kUnlockOpcodeCeiling = 20;
+/** The evaluator's opcodes run to 27; anything wider means the field is not an expression. */
+inline constexpr std::uint32_t kUnlockOpcodeCeiling = 27;
 /** The opcode that reads a value slot. */
 inline constexpr std::uint32_t kUnlockReadValueOpcode = 10;
 /** The opcode that tests a flag. */
@@ -110,12 +107,6 @@ inline constexpr std::uint32_t kUnlockLiteralOpcode = 11;
 inline constexpr std::uint32_t kUnlockExpressionOpcode = 12;
 /** The opcode that tests greater than or equal. */
 inline constexpr std::uint32_t kUnlockGreaterEqualOpcode = 14;
-/** The opcode that inverts the value on top of the stack. Its operand is unused. */
-inline constexpr std::uint32_t kUnlockNotOpcode = 2;
-/** The opcode that folds the top two values with logical and. */
-inline constexpr std::uint32_t kUnlockAndOpcode = 4;
-/** The opcode that tests the top two values for equality. */
-inline constexpr std::uint32_t kUnlockEqualOpcode = 8;
 /** High half every installed array marker and element class carries. */
 inline constexpr std::uint32_t kDefinitionClassHigh = 0x8080U;
 /** Shift that leaves `kDefinitionClassHigh` from a marker or element class. */

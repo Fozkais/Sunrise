@@ -104,6 +104,22 @@
     <ClCompile Include="src\state\rewards\reward_resolver.cpp" />
     <ClCompile Include="src\state\build_data\rewards\reward_catalog.cpp" />
     <ClCompile Include="src\state\build_data\rewards\reward_build_data_runtime.cpp" />
+    <ClCompile Include="src\client\diagnostics\studio\studio_link.cpp" />
+    <ClCompile Include="src\client\diagnostics\studio\studio_world_reader.cpp" />
+    <ClCompile Include="src\client\diagnostics\studio\studio_world_link.cpp" />
+    <ClCompile Include="src\client\diagnostics\studio\studio_pose_capture.cpp" />
+    <!-- Uncounted observer boundaries must not call compiler debug helpers. -->
+    <ClCompile Include="src\client\diagnostics\studio\studio_pose_link.cpp">
+      <SupportJustMyCode>false</SupportJustMyCode>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+    </ClCompile>
+    <ClCompile Include="src\client\diagnostics\studio\studio_object_link.cpp" />
+    <ClCompile Include="src\client\diagnostics\studio\studio_cui_reader.cpp" />
+    <ClCompile Include="src\client\diagnostics\studio\studio_cui_link.cpp" />
+    <ClCompile Include="src\client\diagnostics\studio\studio_cui_observer.cpp">
+      <SupportJustMyCode>false</SupportJustMyCode>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+    </ClCompile>
     <ClCompile Include="src\state\gameplay\external\entity_object_types.cpp" />
     <ClCompile Include="src\state\investment\investment_account_store.cpp" />
     <ClCompile Include="src\state\investment\investment_database.cpp" />

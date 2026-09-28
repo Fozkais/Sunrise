@@ -2,6 +2,7 @@
 
 #include <limits>
 
+#include "../reader/layout.h"
 #include "field_reader.h"
 
 namespace sunrise::middleware::content::packages::tables {

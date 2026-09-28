@@ -118,9 +118,8 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
         domains.constants.weaponPowerStatRow,
         domains.constants.characterStatRows,
     };
-    if (status != cache::LoadStatus::loaded || !constants::replace(cachedConstants)
-        || !content::replace(domains.named) || !content::seal() || !items::replace(domains.items)
-        || !collectibles::replace(domains.collectibles)
+    if (!constants::replace(cachedConstants) || !content::replace(domains.named) || !content::seal()
+        || !items::replace(domains.items) || !collectibles::replace(domains.collectibles)
         || !rewards::replace({domains.rewardPools,
                               domains.rewardEntries,
                               domains.rewardItems,
