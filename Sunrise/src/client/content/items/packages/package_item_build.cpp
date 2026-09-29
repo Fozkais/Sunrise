@@ -37,6 +37,7 @@ namespace {
            && state::build_data::season_pass_ready()
            && state::build_data::repeatable_bounties_ready()
            && state::build_data::unlock_flags_ready()
+           && state::build_data::unlock_flag_names_ready()
            && state::build_data::record_definitions_ready()
            && state::build_data::node_definitions_ready()
            && state::build_data::sobject_definitions_ready()
@@ -252,6 +253,21 @@ bool build() noexcept {
                        && build_bounties(source, storage, rowCount)) {
                 (void)state::build_data::publish_repeatable_bounties(
                     std::span(storage.bountyRows).first(storage.bountyCount));
+            }
+            // Flag names come from the collectible and record tables, so they follow both. A
+            // build whose names cannot be read still completes, with no names.
+            if (!state::build_data::unlock_flag_names_ready()
+                && state::build_data::unlock_flags_ready()
+                && state::build_data::collectible_definitions_ready()) {
+                const bool named =
+                    build_unlock_flag_names(source,
+                                            storage,
+                                            std::span<const std::byte>{storage.container},
+                                            std::span<const std::byte>{storage.root});
+                const std::size_t nameCount = named ? storage.unlockFlagNameCount : 0;
+                report_unlock_flag_name_count(nameCount, named);
+                (void)state::build_data::publish_unlock_flag_names(
+                    std::span(storage.unlockFlagNames).first(nameCount));
             }
         }
     }

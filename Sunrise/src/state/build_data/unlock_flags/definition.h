@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -29,6 +30,30 @@ struct Definition {
     std::uint16_t bank{};
     /** Row inside that bank, or the no-row value. */
     std::uint16_t row{kNoRow};
+};
+
+/** Most bytes of a flag name; a longer name is cut at a character boundary. */
+inline constexpr std::size_t kNameLength = 62;
+
+/** What a flag was named after. */
+enum class NameSource : std::uint8_t {
+    /** The name of the first collectible whose acquired state tests the flag. */
+    collectible = 1,
+    /** The name of the first record whose completion sets the flag. */
+    record = 2,
+};
+
+/** The English name of one flag, taken from the first definition that refers to it. */
+struct Name {
+    /** Slot of the flag the name belongs to. */
+    std::uint16_t slot{};
+    NameSource source{};
+    /** Bytes of the name in use. */
+    std::uint8_t length{};
+    /** Definitions of the named kind that refer to the flag; a shared flag has several. */
+    std::uint16_t references{};
+    /** UTF-8 text, zero past `length`. */
+    std::array<char, kNameLength> text{};
 };
 
 } // namespace sunrise::state::build_data::unlock_flags

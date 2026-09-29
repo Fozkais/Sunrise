@@ -172,7 +172,8 @@ template <typename Value, typename Less>
            && counts.seasonPassRewards <= domains.seasonPassRewards.size()
            && counts.seasonPassPackages <= domains.seasonPassPackages.size()
            && counts.bounties <= domains.bounties.size()
-           && counts.unlockFlags <= domains.unlockFlags.size();
+           && counts.unlockFlags <= domains.unlockFlags.size()
+           && counts.unlockFlagNames <= domains.unlockFlagNames.size();
 }
 
 } // namespace
@@ -254,6 +255,7 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
         || (!domains.seasonPassRewards.empty()
             && !season_pass::valid(domains.seasonPassRewards, domains.seasonPassPackages))
         || !bounties::valid(domains.bounties) || !unlock_flags::valid(domains.unlockFlags)
+        || !unlock_flags::valid_names(domains.unlockFlagNames)
         || !build_data::records::valid(domains.records,
                                        domains.recordObjectives,
                                        domains.recordIntervals,

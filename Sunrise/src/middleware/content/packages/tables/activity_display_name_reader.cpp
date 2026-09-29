@@ -557,4 +557,56 @@ bool resolve(const Source& source,
     }
 }
 
+/** Resolves the display name of every banked reference into the snapshot. */
+bool resolve_banked(const Source& source,
+                    std::span<const BankedReference> references,
+                    Snapshot& output) noexcept {
+    output = {};
+    if (source.read == nullptr || source.stringBankIndexTag == 0 || references.empty()) {
+        return false;
+    }
+    try {
+        std::vector<std::byte> bankBlob;
+        std::vector<Bank> banks{};
+        if (!source.read(source.context, source.stringBankIndexTag, kStringBankIndexClass, bankBlob)
+            || !read_banks(bankBlob, banks)) {
+            return false;
+        }
+        Snapshot pending{};
+        pending.names.resize(references.size());
+        std::vector<LoadedBank> loadedBanks(banks.size());
+        std::vector<bool> unreadable(banks.size(), false);
+        for (std::size_t index = 0; index < references.size(); ++index) {
+            Name& name = pending.names[index];
+            name.bankIndex = references[index].bankIndex;
+            name.stringHash = references[index].stringHash;
+            bool resolved = false;
+            if (name.stringHash != kLiteralPartHash && name.bankIndex < banks.size()
+                && !unreadable[name.bankIndex]) {
+                LoadedBank& loaded = loadedBanks[name.bankIndex];
+                if (!loaded.loaded && !load_bank(source, banks[name.bankIndex], loaded)) {
+                    unreadable[name.bankIndex] = true;
+                }
+                resolved =
+                    loaded.loaded
+                    && resolve_name(loaded, name.stringHash, name) == ResolveStatus::resolved;
+            }
+            if (resolved) {
+                ++pending.resolvedCount;
+            } else {
+                name = {};
+                name.bankIndex = references[index].bankIndex;
+                name.stringHash = references[index].stringHash;
+                name.authoredEmpty = true;
+                ++pending.authoredEmptyCount;
+            }
+        }
+        output = std::move(pending);
+        return true;
+    } catch (...) {
+        output = {};
+        return false;
+    }
+}
+
 } // namespace sunrise::middleware::content::packages::tables::activity_display_names

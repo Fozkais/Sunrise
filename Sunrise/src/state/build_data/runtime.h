@@ -431,6 +431,24 @@ publish_progression_definitions(std::span<const progressions::Definition> defini
 [[nodiscard]] bool
 publish_unlock_flags(std::span<const unlock_flags::Definition> definitions) noexcept;
 
+/** @return True when a complete unlock flag name table, empty or not, is in State. */
+[[nodiscard]] bool unlock_flag_names_ready() noexcept;
+
+/**
+ * Publishes the names of the unlock flags.
+ * @param names Rows in ascending slot order, each naming a slot of the published flag table.
+ * @return True when the rows pass the checks and any needed cache write succeeds.
+ */
+[[nodiscard]] bool publish_unlock_flag_names(std::span<const unlock_flags::Name> names) noexcept;
+
+/**
+ * Finds the name of one unlock flag.
+ * @param slot Slot of the flag.
+ * @param name Receives the row.
+ * @return True when the flag has a name.
+ */
+[[nodiscard]] bool find_unlock_flag_name(std::uint16_t slot, unlock_flags::Name& name) noexcept;
+
 /** @return True when the repeatable bounty table is in State. */
 [[nodiscard]] bool repeatable_bounties_ready() noexcept;
 

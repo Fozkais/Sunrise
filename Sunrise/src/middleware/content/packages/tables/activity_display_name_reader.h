@@ -41,6 +41,12 @@ struct Reference final {
     std::uint32_t stringHash{};
 };
 
+/** One localized-string reference as a definition row carries it: the bank row, then the hash. */
+struct BankedReference final {
+    std::uint32_t bankIndex{};
+    std::uint32_t stringHash{};
+};
+
 /** Callback that reads one installed tag and verifies its class. */
 using TagReader = bool (*)(void* context,
                            std::uint32_t tag,
@@ -76,5 +82,18 @@ struct Source final {
  */
 [[nodiscard]] bool
 resolve(const Source& source, std::span<const Reference> references, Snapshot& output) noexcept;
+
+/**
+ * Resolves exact English strings for references that name their bank by row.
+ * A reference whose bank row is out of range, whose bank will not read, or whose hash the bank
+ * does not hold is an authored empty name, so one bad bank never discards the others.
+ * @param source Installed or synthetic tag source; only the bank index tag is used.
+ * @param references Bank row and string hash of each string, in the order the names come back.
+ * @param output Receives one name per reference.
+ * @return True when the bank index read and every reference was answered.
+ */
+[[nodiscard]] bool resolve_banked(const Source& source,
+                                  std::span<const BankedReference> references,
+                                  Snapshot& output) noexcept;
 
 } // namespace sunrise::middleware::content::packages::tables::activity_display_names

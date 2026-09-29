@@ -73,6 +73,12 @@ void rollback_name_catalog_publication() noexcept {
     hash_names::clear();
 }
 
+/** Drops the flag-name ready flag, then removes the failed flag-name candidate. */
+void rollback_unlock_flag_name_publication() noexcept {
+    runtime::unlock_flag_names::clear();
+    unlock_flags::clear_names();
+}
+
 /** Drops the spawn-set ready flag, then removes the failed spawn-set candidate. */
 void rollback_spawn_catalog_publication() noexcept {
     runtime::spawn_catalog::clear();
@@ -184,6 +190,34 @@ bool publish_hash_names(std::span<const hash_names::Name> names) noexcept {
 bool find_hash_name(std::uint32_t hash, hash_names::Name& name) noexcept {
     name = {};
     return hash_names_ready() && hash_names::find(hash, name);
+}
+
+/** @return True when a complete unlock flag name table, empty or not, is published. */
+bool unlock_flag_names_ready() noexcept {
+    return runtime::unlock_flag_names::ready();
+}
+
+/** Publishes the names of the unlock flags in one step, each to a slot the flag table holds. */
+bool publish_unlock_flag_names(std::span<const unlock_flags::Name> names) noexcept {
+    runtime::persistence::Transaction transaction;
+    if (!transaction.active()) {
+        return false;
+    }
+    // A name for a slot the flag table lacks would describe nothing, so the table comes first.
+    const bool fits = unlock_flags_ready()
+                      && (names.empty() || names.back().slot < unlock_flags::count())
+                      && unlock_flags::replace_names(names);
+    if (!fits) {
+        return transaction.finish(false, rollback_unlock_flag_name_publication);
+    }
+    runtime::unlock_flag_names::publish();
+    return transaction.finish(true, rollback_unlock_flag_name_publication);
+}
+
+/** Finds the name of one unlock flag by its slot. */
+bool find_unlock_flag_name(std::uint16_t slot, unlock_flags::Name& name) noexcept {
+    name = {};
+    return unlock_flag_names_ready() && unlock_flags::find_name(slot, name);
 }
 
 /** @return True when a complete spawn-set catalog, empty or not, is published. */
@@ -375,6 +409,7 @@ void clear_catalogs() noexcept {
     season_pass::clear();
     bounties::clear();
     unlock_flags::clear();
+    rollback_unlock_flag_name_publication();
     records::clear();
     nodes::clear();
     sobjects::clear();

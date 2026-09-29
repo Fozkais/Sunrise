@@ -83,6 +83,7 @@ struct Context {
     std::vector<season_pass::Package> seasonPassPackageScratch{};
     std::vector<bounties::Definition> bountyScratch{};
     std::vector<unlock_flags::Definition> unlockFlagScratch{};
+    std::vector<unlock_flags::Name> unlockFlagNameScratch{};
     std::vector<records::Definition> recordScratch{};
     std::vector<records::Objective> recordObjectiveScratch{};
     std::vector<records::Interval> recordIntervalScratch{};

@@ -54,6 +54,21 @@ void report_unlock_flag_count(std::size_t count) noexcept {
     }
 }
 
+/** @param count Unlock flags the pass named. @param succeeded False when the naming failed. */
+void report_unlock_flag_name_count(std::size_t count, bool succeeded) noexcept {
+    std::array<char, 112> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=pkg stage=unlock_flag_names result=%s rows=%zu",
+                                      succeeded ? "ok" : "fail",
+                                      count);
+    if (written > 0) {
+        core::log::write(core::log::Channel::client,
+                         succeeded ? core::log::Level::info : core::log::Level::warn,
+                         {line.data(), static_cast<std::size_t>(written)});
+    }
+}
+
 /** Reports the precise ability boundary without flooding the periodic extraction retry. */
 void report_ability_failure(const char* stage,
                             std::size_t character,

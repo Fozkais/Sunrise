@@ -167,6 +167,26 @@ bool decode(const UnlockFlagRecord& record, unlock_flags::Definition& value) noe
     return true;
 }
 
+/** Encodes one unlock flag name. */
+bool encode(const unlock_flags::Name& value, UnlockFlagNameRecord& record) noexcept {
+    record = {value.text,
+              value.slot,
+              value.references,
+              static_cast<std::uint8_t>(value.source),
+              value.length};
+    return true;
+}
+
+/** Decodes one unlock flag name; the name catalog checks its content. */
+bool decode(const UnlockFlagNameRecord& record, unlock_flags::Name& value) noexcept {
+    value = {record.slot,
+             static_cast<unlock_flags::NameSource>(record.source),
+             record.length,
+             record.references,
+             record.text};
+    return true;
+}
+
 /** Encodes one record objective row with its padding zeroed. */
 bool encode(const build_data::records::Objective& value, RecordObjectiveRecord& record) noexcept {
     record = {value.completionValue,

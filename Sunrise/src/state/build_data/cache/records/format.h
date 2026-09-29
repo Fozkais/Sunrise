@@ -31,7 +31,7 @@ namespace sunrise::state::build_data::cache::records {
 /** These 8 ASCII bytes mark a Sunrise build-data file. */
 inline constexpr std::array<char, 8> kCacheMagic{'S', 'U', 'N', 'R', 'I', 'S', 'E', 'B'};
 /** Bump when stored layouts or extracted values change; other versions are rebuilt. */
-inline constexpr std::uint32_t kCacheFormatVersion = 67;
+inline constexpr std::uint32_t kCacheFormatVersion = 68;
 /** Signed -1 on disk means there is no equipment slot. */
 inline constexpr std::int8_t kAbsentEquipmentSlot = -1;
 /** The standard 64-bit FNV-1a offset basis starts the payload checksum. */
@@ -105,6 +105,7 @@ struct Header {
     std::uint32_t seasonPassPackageCount{};
     std::uint32_t bountyCount{};
     std::uint32_t unlockFlagCount{};
+    std::uint32_t unlockFlagNameCount{};
     gameplay::entity_position_profiles::Fingerprint positionFingerprint{};
     InvestmentConstants constants{};
     std::uint64_t payloadChecksum{};
@@ -337,6 +338,15 @@ struct UnlockFlagRecord {
     std::uint32_t hash{};
     std::uint16_t bank{};
     std::uint16_t row{};
+};
+
+/** Disk form of the English name of one unlock flag. */
+struct UnlockFlagNameRecord {
+    std::array<char, unlock_flags::kNameLength> text{};
+    std::uint16_t slot{};
+    std::uint16_t references{};
+    std::uint8_t source{};
+    std::uint8_t length{};
 };
 
 /**
@@ -587,7 +597,7 @@ static_assert(sizeof(Prefix) == kCacheMagic.size() + sizeof(std::uint32_t));
 static_assert(sizeof(InvestmentConstants)
               == constants::kCharacterStatRowCount + 3 * sizeof(std::uint8_t));
 static_assert(sizeof(Header)
-              == kCacheMagic.size() + 40 * sizeof(std::uint32_t) + 2 * sizeof(std::uint64_t)
+              == kCacheMagic.size() + 41 * sizeof(std::uint32_t) + 2 * sizeof(std::uint64_t)
                      + sizeof(InvestmentConstants)
                      + sizeof(gameplay::entity_position_profiles::Fingerprint));
 static_assert(sizeof(SpawnPointRecord)
@@ -631,6 +641,8 @@ static_assert(sizeof(SeasonPassPackageRecord)
                      + 4 * sizeof(std::uint8_t));
 static_assert(sizeof(BountyRecord) == 2 * sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
 static_assert(sizeof(UnlockFlagRecord) == sizeof(std::uint32_t) + 2 * sizeof(std::uint16_t));
+static_assert(sizeof(UnlockFlagNameRecord)
+              == unlock_flags::kNameLength + 2 * sizeof(std::uint16_t) + 2 * sizeof(std::uint8_t));
 static_assert(sizeof(RecordDefinitionRecord)
               == sizeof(std::uint32_t) + 10 * sizeof(std::uint16_t) + 5 * sizeof(std::uint8_t));
 static_assert(sizeof(RecordObjectiveRecord) == sizeof(std::int32_t) + 4 * sizeof(std::uint16_t));

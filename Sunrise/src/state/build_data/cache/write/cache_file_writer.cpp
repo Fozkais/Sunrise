@@ -50,7 +50,8 @@ namespace {
            && domains.seasonPassRewards.size() <= kMaximumCount
            && domains.seasonPassPackages.size() <= kMaximumCount
            && domains.bounties.size() <= kMaximumCount
-           && domains.unlockFlags.size() <= kMaximumCount;
+           && domains.unlockFlags.size() <= kMaximumCount
+           && domains.unlockFlagNames.size() <= kMaximumCount;
 }
 
 /** @return True when the requested final-name rule is one of the declared values. */

@@ -174,6 +174,11 @@ struct Storage {
                state::build_data::unlock_flags::kDefinitionCapacity>
         unlockFlagRows{};
     std::size_t unlockFlagCount{};
+    /** English names of the unlock flags that a definition refers to, in slot order. */
+    std::array<state::build_data::unlock_flags::Name,
+               state::build_data::unlock_flags::kDefinitionCapacity>
+        unlockFlagNames{};
+    std::size_t unlockFlagNameCount{};
     std::array<state::build_data::collectibles::Definition,
                state::build_data::collectibles::kDefinitionCapacity>
         collectibleRows{};
@@ -395,6 +400,12 @@ read_investment_constants(const reader::Source& source,
                                       Storage& storage,
                                       std::span<const std::byte> root) noexcept;
 
+/** Names the unlock flags that a collectible tests or a record sets. */
+[[nodiscard]] bool build_unlock_flag_names(const reader::Source& source,
+                                           Storage& storage,
+                                           std::span<const std::byte> globals,
+                                           std::span<const std::byte> root) noexcept;
+
 /** Reads the item-type of every repeatable bounty, which is what groups a vendor pool. */
 [[nodiscard]] bool
 build_bounties(const reader::Source& source, Storage& storage, std::size_t itemCount) noexcept;
@@ -427,6 +438,9 @@ void report_ability_count(std::size_t count) noexcept;
 
 /** Reports how many unlock flag rows the pass built. */
 void report_unlock_flag_count(std::size_t count) noexcept;
+
+/** Reports how many unlock flags the pass named, and whether the naming succeeded. */
+void report_unlock_flag_name_count(std::size_t count, bool succeeded) noexcept;
 
 /** Reports a bounded number of exact subclass/ability extraction failures per process. */
 void report_ability_failure(const char* stage,

@@ -129,6 +129,7 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
         || (!domains.seasonPassRewards.empty()
             && !season_pass::replace(domains.seasonPassRewards, domains.seasonPassPackages))
         || !bounties::replace(domains.bounties) || !unlock_flags::replace(domains.unlockFlags)
+        || !unlock_flags::replace_names(domains.unlockFlagNames)
         || !records::replace(domains.records,
                              domains.recordObjectives,
                              domains.recordIntervals,

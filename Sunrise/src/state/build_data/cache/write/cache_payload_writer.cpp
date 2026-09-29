@@ -104,7 +104,8 @@ bool payload_checksum(records::Domains domains, std::uint64_t& checksum) noexcep
            && checksum_domain<records::SeasonPassPackageRecord>(domains.seasonPassPackages,
                                                                 checksum)
            && checksum_domain<records::BountyRecord>(domains.bounties, checksum)
-           && checksum_domain<records::UnlockFlagRecord>(domains.unlockFlags, checksum);
+           && checksum_domain<records::UnlockFlagRecord>(domains.unlockFlags, checksum)
+           && checksum_domain<records::UnlockFlagNameRecord>(domains.unlockFlagNames, checksum);
 }
 
 /** Writes every array in the same order used by the payload checksum. */
@@ -146,7 +147,8 @@ bool write_payload(HANDLE file, records::Domains domains) noexcept {
            && write_domain<records::SeasonPassRewardRecord>(file, domains.seasonPassRewards)
            && write_domain<records::SeasonPassPackageRecord>(file, domains.seasonPassPackages)
            && write_domain<records::BountyRecord>(file, domains.bounties)
-           && write_domain<records::UnlockFlagRecord>(file, domains.unlockFlags);
+           && write_domain<records::UnlockFlagRecord>(file, domains.unlockFlags)
+           && write_domain<records::UnlockFlagNameRecord>(file, domains.unlockFlagNames);
 }
 
 } // namespace sunrise::state::build_data::cache::writer

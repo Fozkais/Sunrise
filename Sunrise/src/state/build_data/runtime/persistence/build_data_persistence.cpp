@@ -94,6 +94,7 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && season_pass::snapshot_packages(scratch.seasonPassPackages, counts.seasonPassPackages)
            && bounties::snapshot(scratch.bounties, counts.bounties)
            && unlock_flags::snapshot(scratch.unlockFlags, counts.unlockFlags)
+           && unlock_flags::snapshot_names(scratch.unlockFlagNames, counts.unlockFlagNames)
            && records::snapshot(scratch.records, counts.records)
            && records::snapshot_objectives(scratch.recordObjectives, counts.recordObjectives)
            && records::snapshot_intervals(scratch.recordIntervals, counts.recordIntervals)
@@ -127,9 +128,9 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && material_requirement_sets_ready() && inventory_bucket_descriptors_ready()
            && socket_entry_lists_ready() && ability_buckets_ready()
            && progression_definitions_ready() && season_pass_ready() && repeatable_bounties_ready()
-           && unlock_flags_ready() && record_definitions_ready() && node_definitions_ready()
-           && sobject_definitions_ready() && scenario_layouts_ready() && spawn_sets_ready()
-           && hash_names_ready() && vendor_catalog_ready()
+           && unlock_flags_ready() && unlock_flag_names_ready() && record_definitions_ready()
+           && node_definitions_ready() && sobject_definitions_ready() && scenario_layouts_ready()
+           && spawn_sets_ready() && hash_names_ready() && vendor_catalog_ready()
            && gameplay::entity_position_profiles::available()
            && gameplay::entity_object_types::available() && constants::find(published);
 }
@@ -233,6 +234,9 @@ cache::records::MutableDomains scratch_domains(Context& state) noexcept {
     const auto unlockFlagRows =
         ensure_scratch<unlock_flags::Definition, unlock_flags::kDefinitionCapacity>(
             state.unlockFlagScratch);
+    const auto unlockFlagNameRows =
+        ensure_scratch<unlock_flags::Name, unlock_flags::kDefinitionCapacity>(
+            state.unlockFlagNameScratch);
     const auto positionProfiles = ensure_scratch<gameplay::entity_position_profiles::Row,
                                                  gameplay::entity_position_profiles::kMaximumRows>(
         state.positionProfileScratch);
@@ -277,6 +281,7 @@ cache::records::MutableDomains scratch_domains(Context& state) noexcept {
         seasonPassPackages,
         bountyRows,
         unlockFlagRows,
+        unlockFlagNameRows,
     };
 }
 
@@ -309,6 +314,7 @@ void release_scratch_locked(Context& state) noexcept {
     release_bank(state.seasonPassPackageScratch);
     release_bank(state.bountyScratch);
     release_bank(state.unlockFlagScratch);
+    release_bank(state.unlockFlagNameScratch);
     release_bank(state.recordScratch);
     release_bank(state.recordObjectiveScratch);
     release_bank(state.recordIntervalScratch);
@@ -415,6 +421,8 @@ cache::records::Domains occupied_domains(Context& state,
         std::span<const bounties::Definition>{state.bountyScratch.data(), counts.bounties},
         std::span<const unlock_flags::Definition>{state.unlockFlagScratch.data(),
                                                   counts.unlockFlags},
+        std::span<const unlock_flags::Name>{state.unlockFlagNameScratch.data(),
+                                            counts.unlockFlagNames},
     };
 }
 

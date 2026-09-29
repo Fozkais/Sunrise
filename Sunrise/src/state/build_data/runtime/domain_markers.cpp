@@ -41,6 +41,7 @@ DomainMarker g_details;
 DomainMarker g_named;
 DomainMarker g_spawnCatalog;
 DomainMarker g_bubbleCatalog;
+DomainMarker g_unlockFlagNames;
 
 } // namespace
 
@@ -107,6 +108,22 @@ bool ready() noexcept {
 }
 
 } // namespace name_catalog
+
+namespace unlock_flag_names {
+
+void clear() noexcept {
+    g_unlockFlagNames.clear();
+}
+
+void publish() noexcept {
+    g_unlockFlagNames.publish();
+}
+
+bool ready() noexcept {
+    return g_unlockFlagNames.ready();
+}
+
+} // namespace unlock_flag_names
 
 namespace spawn_catalog {
 

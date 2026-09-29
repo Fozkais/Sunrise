@@ -247,6 +247,12 @@ inline constexpr std::uint32_t kItemStringsIndexRowClass = 0x80805CDFU;
 /** Item-type pair on one item's strings blob: the bank, then the name hash inside it. */
 inline constexpr std::size_t kItemStringsTypePairOffset = 144;
 inline constexpr std::size_t kItemStringsTypeHashOffset = 148;
+/** The item's name on its strings blob: the string bank row, then the string hash. */
+inline constexpr std::size_t kItemStringsNameOffset = 132;
+/** The record's name on its display row: the string bank row, then the string hash. */
+inline constexpr std::size_t kRecordDisplayNameOffset = 8;
+/** Globals child holding the localized string bank index. */
+inline constexpr std::size_t kStringBankIndexChild = 72;
 
 /** One array found inside a definition blob. */
 struct Array {

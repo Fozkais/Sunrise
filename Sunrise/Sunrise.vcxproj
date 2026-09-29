@@ -1155,6 +1155,7 @@
     <ClCompile Include="src\client\content\items\packages\package_season_pass_build.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_bounty_build.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_unlock_flag_build.cpp" />
+    <ClCompile Include="src\client\content\items\packages\package_unlock_flag_name_build.cpp" />
     <ClCompile Include="src\middleware\content\packages\reader\package_file_locator.cpp" />
     <ClCompile Include="src\middleware\crypto\aes_gcm_decrypt.cpp" />
     <ClCompile Include="src\middleware\content\manifest\content_manifest_encoder.cpp" />

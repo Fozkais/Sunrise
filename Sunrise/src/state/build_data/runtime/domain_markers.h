@@ -58,6 +58,20 @@ void publish() noexcept;
 
 } // namespace name_catalog
 
+/** Unlock flag name table publish marker. */
+namespace unlock_flag_names {
+
+/** Clears the marker. */
+void clear() noexcept;
+
+/** Marks the domain complete. An empty domain counts as complete. */
+void publish() noexcept;
+
+/** @return True once a complete domain has been published. */
+[[nodiscard]] bool ready() noexcept;
+
+} // namespace unlock_flag_names
+
 /** Spawn-set catalog publish marker. */
 namespace spawn_catalog {
 

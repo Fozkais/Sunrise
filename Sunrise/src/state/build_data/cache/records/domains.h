@@ -69,6 +69,7 @@ struct DomainCounts {
     std::size_t seasonPassPackages{};
     std::size_t bounties{};
     std::size_t unlockFlags{};
+    std::size_t unlockFlagNames{};
 };
 
 /** Fixed caller storage used while decoding the cache domains. */
@@ -113,6 +114,7 @@ struct MutableDomains {
     std::span<season_pass::Package> seasonPassPackages;
     std::span<bounties::Definition> bounties;
     std::span<unlock_flags::Definition> unlockFlags;
+    std::span<unlock_flags::Name> unlockFlagNames;
 };
 
 /** Read-only complete views used for the checks and for cache encoding. */
@@ -156,6 +158,7 @@ struct Domains {
     std::span<const season_pass::Package> seasonPassPackages;
     std::span<const bounties::Definition> bounties;
     std::span<const unlock_flags::Definition> unlockFlags;
+    std::span<const unlock_flags::Name> unlockFlagNames;
 };
 
 } // namespace sunrise::state::build_data::cache::records
