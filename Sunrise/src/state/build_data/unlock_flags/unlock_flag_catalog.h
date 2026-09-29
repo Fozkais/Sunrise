@@ -58,6 +58,17 @@ find_bank_row(std::uint16_t bank, std::uint16_t row, std::uint16_t& slot) noexce
 [[nodiscard]] std::size_t count() noexcept;
 
 /**
+ * Writes the name of the flag a bank row stores, as text a log line can carry.
+ * A flag that several definitions share reads "name (+N)", N being the other definitions.
+ * @param bank Bank code.
+ * @param row Row inside that bank.
+ * @param output Caller-owned text storage; a name that does not fit is cut, never overrun.
+ * @return Bytes written before the terminator, or zero when the row stores no named flag.
+ */
+[[nodiscard]] std::size_t
+describe(std::uint16_t bank, std::uint16_t row, std::span<char> output) noexcept;
+
+/**
  * Checks one complete flag name table.
  * @param names Candidate rows in ascending slot order.
  * @return True when the rows fit storage, each holds a bounded name, and the slots are unique.

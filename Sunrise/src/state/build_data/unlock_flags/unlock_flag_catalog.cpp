@@ -1,7 +1,9 @@
 #include "unlock_flag_catalog.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <shared_mutex>
+#include <string_view>
 
 #include "../table.h"
 #include "core/threading/srw_lock.h"
@@ -110,6 +112,31 @@ bool snapshot(std::span<Definition> output, std::size_t& count) noexcept {
 std::size_t count() noexcept {
     const std::shared_lock guard(g_lock);
     return g_definitions.count();
+}
+
+/** Writes the name of the flag a bank row stores. */
+std::size_t describe(std::uint16_t bank, std::uint16_t row, std::span<char> output) noexcept {
+    if (output.empty()) {
+        return 0;
+    }
+    output[0] = '\0';
+    std::uint16_t slot = 0;
+    Name name;
+    if (!find_bank_row(bank, row, slot) || !find_name(slot, name)) {
+        return 0;
+    }
+    const std::string_view text(name.text.data(), name.length);
+    const int written =
+        name.references > 1
+            ? std::snprintf(output.data(),
+                            output.size(),
+                            "%.*s (+%u)",
+                            static_cast<int>(text.size()),
+                            text.data(),
+                            static_cast<unsigned>(name.references - 1U))
+            : std::snprintf(
+                  output.data(), output.size(), "%.*s", static_cast<int>(text.size()), text.data());
+    return written > 0 ? (std::min)(static_cast<std::size_t>(written), output.size() - 1U) : 0U;
 }
 
 /** Checks one complete flag name table. */
