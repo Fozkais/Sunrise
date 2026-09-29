@@ -3,10 +3,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <string>
 #include <string_view>
 #include <tuple>
 
 #include "../../../state/activity/membership/definition.h"
+#include "../../../state/build_data/activities/activity_catalog.h"
 #include "mission_script_lua_internal.h"
 #include "mission_script_lua_names.h"
 #include "mission_script_lua_peer_internal.h"
@@ -102,14 +104,16 @@ namespace {
 
 /**
  * Completes this attempt through the native lifetime owner.
- * @param state Lua call holding
- * the context and empty argument table.
+ * `next = "<activity name>"` (or an activity index, to pick one of several rows sharing a name)
+ * also moves the client straight into that activity once the completion is accepted, instead of
+ * returning it to orbit first.
+ * @param state Lua call holding the context and the optional `{next = activity name}`.
  * @return One RequestKey.
  */
 [[nodiscard]] int context_complete_mission(lua_State* state) {
     static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
-    // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 0> kDeclared{};
+    // Only this named argument belongs to this API.
+    static constexpr std::array<std::string_view, 1> kDeclared{"next"};
     refuse_unknown_arguments(state, kDeclared);
     if (impl_from_state(state)->attempt.complete) {
         return luaL_error(state, "mission attempt is already complete");
@@ -117,6 +121,32 @@ namespace {
     Intent intent{};
     intent.kind = IntentKind::setLifetime;
     intent.lifetimeState = ::sunrise::state::activity::mission::kCompletedLifetimeState;
+    lua_getfield(state, 2, "next");
+    if (!lua_isnil(state, -1)) {
+        const auto rows = ::sunrise::state::build_data::activities::entries();
+        if (lua_isinteger(state, -1)) {
+            // An activity index: names a variant when several rows share one package name.
+            const lua_Integer index = lua_tointeger(state, -1);
+            if (index < 0 || static_cast<std::uint64_t>(index) >= rows.size()
+                || rows[static_cast<std::size_t>(index)].name().empty()) {
+                return luaL_error(state, "next names no activity index: %d", static_cast<int>(index));
+            }
+            intent.continuationActivity = static_cast<std::int16_t>(index);
+        } else if (lua_type(state, -1) == LUA_TSTRING) {
+            const std::string_view name = lua_string_view(state, -1);
+            const auto found =
+                std::find_if(rows.begin(), rows.end(), [name](const auto& row) noexcept {
+                    return !name.empty() && row.name() == name;
+                });
+            if (found == rows.end()) {
+                return luaL_error(state, "next names no activity: %s", std::string(name).c_str());
+            }
+            intent.continuationActivity = static_cast<std::int16_t>(found - rows.begin());
+        } else {
+            return luaL_argerror(state, 2, "next must be an activity name or index");
+        }
+    }
+    lua_pop(state, 1);
     return queue_intent(state, active_frame(state), intent);
 }
 
@@ -124,6 +154,12 @@ namespace {
     static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
     SquadDefinition definition{};
     if (!resolve_squad(state, 2, definition)) {
+        // Name the squad: a script places dozens, and one refusal aborts the lot.
+        if (lua_type(state, 2) == LUA_TSTRING) {
+            return luaL_error(state,
+                              "unknown or ambiguous activity squad: %s",
+                              std::string(lua_string_view(state, 2)).c_str());
+        }
         return luaL_error(state, "unknown or ambiguous activity squad");
     }
     push_handle(state, kSquadMetatable, SquadHandle{definition.localRow});
@@ -133,13 +169,24 @@ namespace {
 /**
  * Arms a native hard wipe at an authored spawn set, or releases one with its request key.
  * The Lua caller passes `release_request` as the decimal string of the original key.
+ * `dev = true` opens the next attempt at once instead, with no wipe: the in-game mission panel
+ * replays a step that way while the player stays where they are.
  */
 [[nodiscard]] int context_restart_checkpoint(lua_State* state) {
     static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
     // Only these named arguments belong to this API.
-    static constexpr std::array<std::string_view, 3> kDeclared{
-        "region", "spawn_set_hash", "release_request"};
+    static constexpr std::array<std::string_view, 4> kDeclared{
+        "region", "spawn_set_hash", "release_request", "dev"};
     refuse_unknown_arguments(state, kDeclared);
+    lua_getfield(state, 2, "dev");
+    const bool local = lua_toboolean(state, -1) != 0;
+    lua_pop(state, 1);
+    if (local) {
+        Intent intent{};
+        intent.kind = IntentKind::restartCheckpoint;
+        intent.checkpointLocal = true;
+        return queue_intent(state, active_frame(state), intent);
+    }
     const lua_Integer region = optional_integer_argument(state, "region", -1);
     const lua_Integer hash = optional_integer_argument(state, "spawn_set_hash", 0);
     if (region < 0 || region > ::sunrise::state::activity::membership::kMaximumSliceSetIndex
@@ -183,6 +230,30 @@ namespace {
     Intent intent{};
     intent.kind = IntentKind::holdSpawn;
     intent.active = lua_toboolean(state, -1) != 0;
+    lua_pop(state, 1);
+    return queue_intent(state, active_frame(state), intent);
+}
+
+/**
+ * Names the section the activity is in: a scenario state hash or a section object's registry key.
+ * The lifetime Auth carries it, and the client plays the sequence the scenario pairs with it as
+ * the next move begins (a section's title card), so it is named before that move.
+ * @param state Lua call holding the context and `{key = 32-bit key}`.
+ * @return One RequestKey.
+ */
+[[nodiscard]] int context_set_section(lua_State* state) {
+    static_cast<void>(luaL_checkudata(state, 1, kContextMetatable));
+    // Only this named argument belongs to this API.
+    static constexpr std::array<std::string_view, 1> kDeclared{"key"};
+    refuse_unknown_arguments(state, kDeclared);
+    lua_getfield(state, 2, "key");
+    if (!lua_isinteger(state, -1) || lua_tointeger(state, -1) <= 0
+        || lua_tointeger(state, -1) > (std::numeric_limits<std::uint32_t>::max)()) {
+        return luaL_argerror(state, 2, "set_section requires a 32-bit key");
+    }
+    Intent intent{};
+    intent.kind = IntentKind::setSection;
+    intent.registryKey = static_cast<std::uint32_t>(lua_tointeger(state, -1));
     lua_pop(state, 1);
     return queue_intent(state, active_frame(state), intent);
 }
@@ -334,6 +405,17 @@ resolve_message_name(lua_State* state, std::string_view name, ActivityMessageDef
         }
         intent.retirePlacedProps = lua_toboolean(state, -1) != 0;
         lua_pop(state, 1);
+        // The spawn set the move lands on, for a state whose region holds several areas; without
+        // it the client keeps the set the program declared at attach.
+        lua_getfield(state, 3, "spawn_set_hash");
+        if (!lua_isnil(state, -1)) {
+            if (!lua_isinteger(state, -1) || lua_tointeger(state, -1) <= 0
+                || lua_tointeger(state, -1) >= (std::numeric_limits<std::uint32_t>::max)()) {
+                return luaL_argerror(state, 3, "spawn_set_hash must be a 32-bit hash");
+            }
+            intent.checkpointSpawnHash = static_cast<std::uint32_t>(lua_tointeger(state, -1));
+        }
+        lua_pop(state, 1);
     }
     return queue_intent(state, frame, intent);
 }
@@ -379,6 +461,8 @@ resolve_message_name(lua_State* state, std::string_view name, ActivityMessageDef
         lua_pushcfunction(state, &context_slot);
     } else if (key == "hold_spawn") {
         lua_pushcfunction(state, &context_hold_spawn);
+    } else if (key == "set_section") {
+        lua_pushcfunction(state, &context_set_section);
     } else if (key == "select_state") {
         lua_pushcfunction(state, &context_select_state);
     } else if (key == "restart_checkpoint") {

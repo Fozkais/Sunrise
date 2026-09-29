@@ -7,8 +7,8 @@
 
 namespace sunrise::state::activity::mission {
 
-/** One activity generation retains at most 512 script variables. */
-inline constexpr std::size_t kVariableCapacity = 512;
+/** One activity generation retains at most 768 script variables. */
+inline constexpr std::size_t kVariableCapacity = 768;
 /** One activity generation retains at most thirty-two authoritative timers. */
 inline constexpr std::size_t kTimerCapacity = 32;
 /** Durable variable and timer names contain at most sixty-three bytes. */
@@ -197,6 +197,7 @@ enum class IntentKind : std::uint8_t {
     watchDamage,
     setGhostLink,
     holdSpawn,
+    setSection,
 };
 
 /** Actor sequence values belong to one combatant and one SDK/client generation. */
@@ -250,10 +251,12 @@ struct TypedIntent final {
     std::uint32_t authSchema{};
     /** SDK-selected actor-command selector, never a wire constant owned by Mission State. */
     std::uint32_t actorCommandSelector{};
-    /** Spawn set a checkpoint restart respawns at. */
+    /** Spawn set a checkpoint restart respawns at, or a selected state lands on. */
     std::uint32_t checkpointSpawnHash{};
     /** Request key of the wipe a checkpoint release ends; zero arms one instead. */
     std::uint64_t checkpointReleaseRequest{};
+    /** A development restart opens the next attempt at once, with no wipe and no respawn. */
+    bool checkpointLocal{};
     /** Authored effective region selected by the generated mission-state table. */
     std::int32_t effectiveRegion{-1};
     /** Catalog slot row of a type-66 rule the squad spawns at instead of its own; absent is -1. */
@@ -272,6 +275,8 @@ struct TypedIntent final {
     std::uint8_t slotType{};
     std::uint16_t authByteCount{};
     std::uint8_t lifetimeState{};
+    /** Catalog index of the activity a completing intent continues into; absent is -1. */
+    std::int16_t continuationActivity{-1};
     bool deviceSnap{};
     bool active{};
     /** A state transition may end its captured map-prop lifetimes before teleporting. */

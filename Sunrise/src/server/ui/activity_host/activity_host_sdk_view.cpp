@@ -15,6 +15,7 @@
 #include "../../activity/host_runtime.h"
 #include "../../activity/mission/mission_script_runtime.h"
 #include "../../bap/runtime.h"
+#include "activity_host_mission_dev.h"
 #include "activity_host_scriptable_browser.h"
 #include "activity_host_sdk_mission_view.h"
 #include "activity_host_sdk_squad_view.h"
@@ -149,6 +150,7 @@ void draw_script_runtime(const host::InstanceSnapshot& hostInstance) noexcept {
 
 /** One page. Each holds one family of rows and only that family's actions. */
 enum class Page : std::uint8_t {
+    mission,
     squads,
     idles,
     combatants,
@@ -180,7 +182,8 @@ struct PageRow final {
 };
 
 /** The navigation order. Actions first, then the read-only pages. */
-constexpr std::array<PageRow, 20> kPages{{
+constexpr std::array<PageRow, 21> kPages{{
+    {Page::mission, "Mission", "The running script's steps and zones. Replay any step."},
     {Page::squads, "Squads", "Place an authored squad.", marker::WorldPage::squads},
     {Page::idles, "Idles", "Start an actor's authored state.", marker::WorldPage::squads},
     {Page::combatants, "Combatants", "Bind actors, edit channels and try animation sequences."},
@@ -207,7 +210,7 @@ constexpr std::array<PageRow, 20> kPages{{
 }};
 
 /** Page the navigation is on. It survives a rebind so an operator keeps their place. */
-Page g_page{Page::squads};
+Page g_page{Page::mission};
 
 /** Draws the navigation column and returns the page it leaves selected. */
 [[nodiscard]] const PageRow& draw_navigation() noexcept {
@@ -234,6 +237,9 @@ void draw_page(const PageRow& row,
                const format::Scenario& scenario,
                const host::InstanceSnapshot& instance) noexcept {
     switch (row.page) {
+    case Page::mission:
+        mission_dev::draw();
+        return;
     case Page::squads:
         sdk_squad_view::draw(view, scenario);
         return;

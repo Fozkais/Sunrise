@@ -153,13 +153,13 @@ constexpr std::size_t kSpawnKeyCount = 32;
  * @return True when the body fits.
  */
 [[nodiscard]] bool write_lifetime(bits::Writer& writer, const Snapshot& snapshot) noexcept {
-    // Field `.4` names an authored spawn entry. No host model owns one, so it carries the empty
-    // name hash; zero is a hash that no row matches.
+    // Field `.4` is the section the activity is in. The client finds it in the scenario's
+    // key-to-sequence table and plays the paired sequence; the empty hash plays nothing.
     bool encoded =
         writer.write(std::uint32_t{snapshot.lifetime} + kLifetimeBias, kLifetimeWidth)
         && writer.write(1, 3) && writer.write(kActivityAllowsFireteamJoin, kPresenceWidth)
         && writer.write(kSignedZero, 32)
-        && writer.write(kEmptyNameHash, 32)
+        && writer.write(snapshot.sectionKey, 32)
         // `.5` names the published region's bubble; a disabled darkness policy sends -1.
         && writer.write(snapshot.hasDarknessPolicy && !snapshot.darknessEnabled ? kSignedMinusOne
                         : snapshot.hasRegion ? kSignedZero + snapshot.region / kStatesPerBubble

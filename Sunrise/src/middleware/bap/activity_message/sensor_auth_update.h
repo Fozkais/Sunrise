@@ -225,6 +225,11 @@ struct Snapshot final {
     std::uint32_t spawnSetHash{};
     std::uint32_t spawnSliceSet{};
     std::uint8_t lifetime{};
+    /**
+     * Lifetime field `.4`, the section the activity is in: a scenario state or section object key.
+     * The client looks it up in the scenario's key-to-sequence table and plays that sequence.
+     */
+    std::uint32_t sectionKey{0x811C9DC5U};
     bool hasGrant{};
     bool hasRegion{};
     bool hasSpawnOverride{};

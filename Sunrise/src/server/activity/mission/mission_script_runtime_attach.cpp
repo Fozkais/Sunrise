@@ -702,6 +702,15 @@ bool controller_file_name(std::uint32_t oneBasedActivityRow, std::span<char> out
     return controller_name(*catalog, catalog->activities()[oneBasedActivityRow - 1], output);
 }
 
+bool script_root(std::wstring& output) noexcept {
+    try {
+        output.assign(g_scriptRoot.chars.data(), g_scriptRoot.length);
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+    return !output.empty();
+}
+
 /** Resolves the script root and the SDK Lua search path. Logs its own refusal. */
 bool resolve_script_paths() noexcept {
     HMODULE const module = owning_module();

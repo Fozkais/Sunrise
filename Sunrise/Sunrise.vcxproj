@@ -176,6 +176,7 @@
     <ClCompile Include="src\core\ui\hud\ui_hud_overlay_stack.cpp" />
     <ClCompile Include="src\core\ui\hud\overlays\ui_hud_logo_overlay.cpp" />
     <ClCompile Include="src\core\ui\hud\overlays\ui_hud_mission_script_overlay.cpp" />
+    <ClCompile Include="src\core\ui\hud\overlays\ui_hud_mission_steps_overlay.cpp" />
     <ClCompile Include="src\core\ui\hud\overlays\ui_hud_sensor_events_overlay.cpp" />
     <ClCompile Include="src\core\ui\hud\overlays\ui_hud_session_overlay.cpp" />
     <ClCompile Include="src\core\ui\hud\overlays\ui_hud_status_overlay.cpp" />
@@ -276,6 +277,7 @@
     <ClCompile Include="src\client\hooks\bootflow\bootflow_hook_lifecycle.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\bootflow_texture_override.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\lifetime_gate_probe.cpp" />
+    <ClCompile Include="src\client\hooks\bootflow\loading_suppression.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\world_step.cpp" />
     <ClCompile Include="src\client\hooks\bootflow\spawn\slice_set_sample.cpp" />
     <ClCompile Include="src\server\bap\encrypted\push\activity\activity_arrival.cpp" />
@@ -816,6 +818,9 @@
     <ClCompile Include="src\client\ui\activity\authored_placement_marker_draw.cpp" />
     <ClCompile Include="src\client\ui\activity\authored_placement_marker_settings_store.cpp" />
     <ClCompile Include="src\client\ui\activity\authored_spatial_overlay.cpp" />
+    <ClCompile Include="src\client\ui\activity\mission_zone_overlay.cpp" />
+    <ClCompile Include="src\client\hooks\freecam\freecam.cpp" />
+    <ClCompile Include="src\state\activity\mission\activity_section.cpp" />
     <ClCompile Include="src\client\ui\activity\package_aabb_marker_source.cpp" />
     <ClCompile Include="src\client\ui\activity\package_type23_placement_marker_source.cpp" />
     <ClCompile Include="src\client\ui\activity\package_embedded_placement_marker_source.cpp" />
@@ -880,6 +885,7 @@
     <ClCompile Include="src\server\activity\mission\mission_script_lua_world_rows.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_message_catalog.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_runtime.cpp" />
+    <ClCompile Include="src\server\activity\mission\mission_dev_model.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_runtime_edges.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_runtime_incidents.cpp" />
     <ClCompile Include="src\server\activity\mission\mission_script_runtime_roster.cpp" />
@@ -925,6 +931,10 @@
     <ClCompile Include="src\server\ui\runtime\server_ui_module_runtime.cpp" />
     <ClCompile Include="src\server\ui\activity_host\activity_host_panel.cpp" />
     <ClCompile Include="src\server\ui\activity_host\activity_host_sdk_view.cpp" />
+    <ClCompile Include="src\server\ui\activity_host\activity_host_mission_dev.cpp" />
+    <ClCompile Include="src\server\ui\mission_editor\mission_editor_document.cpp" />
+    <ClCompile Include="src\server\ui\mission_editor\mission_editor_view.cpp" />
+    <ClCompile Include="src\server\ui\mission_editor\mission_editor_window.cpp" />
     <ClCompile Include="src\server\ui\activity_host\activity_host_sdk_mission_view.cpp" />
     <ClCompile Include="src\server\ui\activity_host\activity_host_sdk_state_pages.cpp" />
     <ClCompile Include="src\server\ui\activity_host\activity_host_sdk_actor_sequences.cpp" />
@@ -1373,6 +1383,7 @@
     <ClInclude Include="src\core\ui\hud\overlay.h" />
     <ClInclude Include="src\core\ui\hud\overlays\ui_hud_logo_overlay.h" />
     <ClInclude Include="src\core\ui\hud\overlays\ui_hud_mission_script_overlay.h" />
+    <ClInclude Include="src\core\ui\hud\overlays\ui_hud_mission_steps_overlay.h" />
     <ClInclude Include="src\core\ui\hud\overlays\ui_hud_sensor_events_overlay.h" />
     <ClInclude Include="src\core\ui\hud\overlays\ui_hud_session_overlay.h" />
     <ClInclude Include="src\core\ui\hud\overlays\ui_hud_status_overlay.h" />
@@ -1678,6 +1689,7 @@
     <ClInclude Include="src\server\activity\activity_sdk_mission_runtime.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_message_catalog.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_runtime.h" />
+    <ClInclude Include="src\server\activity\mission\mission_dev_model.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_runtime_internal.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_sdk_bridge.h" />
     <ClInclude Include="src\server\activity\mission\mission_script_slot_index.h" />
@@ -1719,6 +1731,10 @@
     <ClInclude Include="src\server\ui\runtime\server_ui_module_runtime.h" />
     <ClInclude Include="src\server\ui\activity_host\activity_host_panel.h" />
     <ClInclude Include="src\server\ui\activity_host\activity_host_sdk_view.h" />
+    <ClInclude Include="src\server\ui\activity_host\activity_host_mission_dev.h" />
+    <ClInclude Include="src\server\ui\mission_editor\mission_editor_document.h" />
+    <ClInclude Include="src\server\ui\mission_editor\mission_editor_view.h" />
+    <ClInclude Include="src\server\ui\mission_editor\mission_editor_window.h" />
     <ClInclude Include="src\server\ui\activity_host\activity_host_sdk_mission_view.h" />
     <ClInclude Include="src\server\ui\activity_host\activity_host_sdk_state_pages.h" />
     <ClInclude Include="src\server\ui\activity_host\activity_host_sdk_squad_view.h" />
@@ -1970,6 +1986,7 @@
     <ClInclude Include="src\client\hooks\cine_probe\cine_probe.h" />
     <ClInclude Include="src\client\hooks\net_tick_probe\net_tick_probe.h" />
     <ClInclude Include="src\client\hooks\bootflow\internal.h" />
+    <ClInclude Include="src\state\activity\mission\continuation.h" />
     <ClInclude Include="src\client\hooks\bootflow\bootflow_hook_lifecycle.h" />
     <ClInclude Include="src\client\hooks\bootflow\bootflow_texture_override.h" />
     <ClInclude Include="src\client\hooks\bootflow\spawn\slice_set_sample.h" />
@@ -2082,6 +2099,9 @@
     <ClInclude Include="src\client\ui\activity\authored_placement_marker_draw.h" />
     <ClInclude Include="src\client\ui\activity\authored_placement_marker_settings_store.h" />
     <ClInclude Include="src\client\ui\activity\authored_spatial_overlay.h" />
+    <ClInclude Include="src\client\ui\activity\mission_zone_overlay.h" />
+    <ClInclude Include="src\client\hooks\freecam\freecam.h" />
+    <ClInclude Include="src\state\activity\mission\activity_section.h" />
     <ClInclude Include="src\client\ui\activity\package_aabb_marker_source.h" />
     <ClInclude Include="src\client\ui\activity\package_type23_placement_marker_source.h" />
     <ClInclude Include="src\client\ui\activity\package_embedded_placement_marker_source.h" />

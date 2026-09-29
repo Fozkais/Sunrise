@@ -42,6 +42,11 @@ request_manual(std::uint16_t index,
  * @param step The client's current boot-flow step.
  */
 void poll(std::int32_t step) noexcept;
+/**
+ * @return True while a continuation into another activity is between its exit and the new world,
+ *         so the client should skip the loading and fly-in movies. Game thread.
+ */
+[[nodiscard]] bool suppress_loading() noexcept;
 /** @return A static UI message explaining the request result or next required action. */
 [[nodiscard]] const char* description(Status status) noexcept;
 } // namespace sunrise::client::activity::mission_launch

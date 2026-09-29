@@ -12,6 +12,7 @@
 
 #include "../../../../core/ui/runtime/ui_visibility_runtime.h"
 #include "../../../../steam/interfaces/invitations.h"
+#include "../../freecam/freecam.h"
 #include "input.h"
 
 namespace sunrise::client::hooks::graphics::input {
@@ -64,9 +65,14 @@ LRESULT CALLBACK raw_window_procedure(HWND window,
 
     // A captured message still goes to the default procedure, or the system keeps the raw-input
     // buffer alive. That is also the fallback when there is no procedure to forward to.
+    // The spectator camera takes the mouse too: its motion turns the camera, not the player.
+    const bool flying = message == WM_INPUT && freecam::enabled();
+    if (flying) {
+        freecam::observe_raw_input(reinterpret_cast<HRAWINPUT>(value));
+    }
     steam::interfaces::methods::PendingInvitation invitation{};
     const bool captured = message == WM_INPUT
-                          && (core::ui::runtime::snapshot().visible
+                          && (flying || core::ui::runtime::snapshot().visible
                               || steam::interfaces::methods::pending_invitation(invitation));
     const bool forward = !captured && original != nullptr;
     const LRESULT result = forward ? CallWindowProcW(original, window, message, word, value)

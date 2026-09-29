@@ -12,6 +12,7 @@
 #include "../../../../../state/activity/defaults/activity_defaults_snapshot.h"
 #include "../../../../../state/activity/destination/activity_destination_spawn_binding.h"
 #include "../../../../../state/activity/membership/activity_membership_query.h"
+#include "../../../../../state/activity/mission/activity_section.h"
 #include "../../../../../state/activity/runtime.h"
 #include "../../../../../state/build_data/runtime.h"
 #include "../../../../../state/runtime/runtime.h"
@@ -606,6 +607,8 @@ build_roster_snapshot(Session& session,
     // carries matches nothing.
     snapshot.playerKey = published_player_key(session);
     snapshot.lifetime = lifetimeState;
+    snapshot.sectionKey =
+        state::activity::mission::activity_section::get(session.activity.session.sessionId);
     // Each player owns its committed region readiness; a local writeback cannot ready peers.
     // A program that opens on a cutscene holds the spawn too, so no body exists to place.
     snapshot.awaitClientSync =

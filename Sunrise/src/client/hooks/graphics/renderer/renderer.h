@@ -4,6 +4,8 @@
 
 #include <dxgi.h>
 
+#include <atomic>
+
 namespace sunrise::client::hooks::graphics::renderer {
 
 /** Draws the UI frame, if any, for a checked swap chain. */
@@ -37,5 +39,15 @@ void dispatch_pending_input_release(HWND window) noexcept;
 
 /** Runs any deferred capture release once the hook and renderer locks are gone. */
 void dispatch_pending_input_release() noexcept;
+
+/**
+ * Takes the lock every Dear ImGui use in the process runs under, so another window's context can
+ * be made current without racing the game's interface. It never blocks for good: it gives up and
+ * returns false once `abandon` reads true.
+ */
+[[nodiscard]] bool lock_interface(const std::atomic_bool& abandon) noexcept;
+
+/** Releases the lock `lock_interface` took. */
+void unlock_interface() noexcept;
 
 } // namespace sunrise::client::hooks::graphics::renderer

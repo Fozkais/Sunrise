@@ -277,6 +277,15 @@ int protected_callback(lua_State* state) {
         }
         push_event(state, *frame.event);
         arguments = 3;
+    } else if (frame.handler == Handler::dev) {
+        if (frame.devCommand == nullptr) {
+            return luaL_error(state, "mission developer command is missing");
+        }
+        lua_createtable(state, 0, 3);
+        set_string(state, "name", frame.devCommand->name.data());
+        set_string(state, "step", frame.devCommand->step.data());
+        set_string(state, "slot", frame.devCommand->slot.data());
+        arguments = 3;
     }
     lua_call(state, arguments, 0);
     lua_pushboolean(state, 1);
@@ -320,6 +329,8 @@ void destroy_state(Impl& impl) noexcept {
     impl.startReference = LUA_NOREF;
     impl.eventReferences.fill(LUA_NOREF);
     impl.loadReference = LUA_NOREF;
+    impl.devReference = LUA_NOREF;
+    std::string{}.swap(impl.debugDescription);
     impl.hasInitialState = false;
     impl.active = false;
     impl.faulted = false;

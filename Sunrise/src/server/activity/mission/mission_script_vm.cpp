@@ -160,6 +160,38 @@ void instruction_hook(lua_State* state, lua_Debug*) {
     return true;
 }
 
+/** The in-game mission panel reads at most this much of a program's description. */
+constexpr std::size_t kDebugDescriptionByteCapacity = 256U * 1024U;
+
+/** Copies the optional `debug` string the program declares for the in-game mission panel. */
+[[nodiscard]] bool capture_debug_description(lua_State* state, int program, Impl& impl) noexcept {
+    std::string{}.swap(impl.debugDescription);
+    lua_pushliteral(state, "debug");
+    lua_rawget(state, program);
+    if (lua_isnil(state, -1)) {
+        lua_pop(state, 1);
+        return true;
+    }
+    if (lua_type(state, -1) != LUA_TSTRING) {
+        lua_pop(state, 1);
+        return false;
+    }
+    std::size_t length = 0;
+    const char* const text = lua_tolstring(state, -1, &length);
+    if (length > kDebugDescriptionByteCapacity) {
+        lua_pop(state, 1);
+        return false;
+    }
+    try {
+        impl.debugDescription.assign(text, length);
+    } catch (const std::bad_alloc&) {
+        lua_pop(state, 1);
+        return false;
+    }
+    lua_pop(state, 1);
+    return true;
+}
+
 // One callback name per EventKind, in EventKind order. The index is the kind.
 inline constexpr std::array<const char*, host::kEventKindCount> kEventHandlerNames{{
     "on_event_sensor_sense_updated",
@@ -234,8 +266,12 @@ static_assert([] {
                           "initial_state must be a generated state with an integer region_index");
     }
     if (!capture_handler(state, 1, "on_start", impl->startReference)
-        || !capture_handler(state, 1, "on_load", impl->loadReference)) {
+        || !capture_handler(state, 1, "on_load", impl->loadReference)
+        || !capture_handler(state, 1, "on_dev_command", impl->devReference)) {
         return luaL_error(state, "mission entries must be functions or nil");
+    }
+    if (!capture_debug_description(state, 1, *impl)) {
+        return luaL_error(state, "mission debug must be a string of at most 256 KiB or nil");
     }
     for (std::size_t index = 0; index < kEventHandlerNames.size(); ++index) {
         if (!capture_handler(state, 1, kEventHandlerNames[index], impl->eventReferences[index])) {
@@ -457,7 +493,8 @@ void arm_dialogue_timer(Candidate& candidate,
                                 Handler handler,
                                 const host::Event* event,
                                 const host::ClientMessageSnapshot* clientMessage,
-                                std::uint64_t now) noexcept {
+                                std::uint64_t now,
+                                const DevCommand* devCommand = nullptr) noexcept {
     if (!impl.active || impl.state == nullptr || impl.faulted) {
         return CallStatus::inactive;
     }
@@ -475,6 +512,7 @@ void arm_dialogue_timer(Candidate& candidate,
     frame.handler = handler;
     frame.event = event;
     frame.clientMessage = clientMessage;
+    frame.devCommand = devCommand;
     frame.now = now;
     impl.frame = &frame;
     ++impl.callbacks;
@@ -776,6 +814,21 @@ CallStatus load(Vm& vm, std::uint64_t now) noexcept {
         return CallStatus::noHandler;
     }
     return invoke(impl, Handler::load, nullptr, nullptr, now);
+}
+
+/** Runs one developer command; a program that declares no handler costs nothing. */
+CallStatus dev_command(Vm& vm, const DevCommand& command, std::uint64_t now) noexcept {
+    Impl& impl = VmAccess::get(vm);
+    if (impl.devReference == LUA_NOREF && impl.active && impl.state != nullptr && !impl.faulted) {
+        return CallStatus::noHandler;
+    }
+    return invoke(impl, Handler::dev, nullptr, nullptr, now, &command);
+}
+
+/** @return The description copied at open; it stays valid until the program closes. */
+std::string_view debug_description(const Vm& vm) noexcept {
+    const Impl& impl = VmAccess::get(vm);
+    return impl.active ? std::string_view(impl.debugDescription) : std::string_view{};
 }
 
 CallStatus dispatch(Vm& vm,

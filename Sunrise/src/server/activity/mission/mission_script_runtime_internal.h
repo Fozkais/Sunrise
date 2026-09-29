@@ -298,6 +298,8 @@ struct RuntimeInstance final {
      */
     std::array<std::uint64_t, 8> partyRegions{};
     std::uint64_t partyRegionsAttempt{};
+    /** Highest variable-pressure band already logged, so a crossing is reported once. */
+    std::size_t variablesLogged{};
     ProgramStatus programStatus{ProgramStatus::none};
     DeliveryStage deliveryStage{DeliveryStage::idle};
     /** The player key the bound link's message 5 binds, read at attach. */
@@ -407,9 +409,14 @@ void push_objective_edges(RuntimeInstance& instance,
                           const host::SenseObservationSnapshot& sense) noexcept;
 /** Reports one committed phase change to the script. */
 void queue_phase_entered(RuntimeInstance& instance, std::uint32_t previousPhase) noexcept;
-/** Moves the client to the region a freshly selected mission state belongs to. */
+/**
+ * Moves the client to the region a freshly selected mission state belongs to.
+ * @param relocate True to move the client even inside the region it already reports, for a
+ * selection that named a spawn set: the same region holds several areas.
+ */
 void arm_state_region_teleport(RuntimeInstance& instance,
-                               const server::bap::ActivityMissionSeedPlan& plan) noexcept;
+                               const server::bap::ActivityMissionSeedPlan& plan,
+                               bool relocate) noexcept;
 /** @return The identity every host-state edge that is not a Sense edge carries. */
 [[nodiscard]] host::Event state_edge_event(const RuntimeInstance& instance) noexcept;
 /** Raises one event per peer session that appeared or left this instance's destination. */

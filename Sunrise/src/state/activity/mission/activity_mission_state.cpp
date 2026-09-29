@@ -128,6 +128,7 @@ namespace {
            && left.burstRowCount == right.burstRowCount
            && left.checkpointSpawnHash == right.checkpointSpawnHash
            && left.checkpointReleaseRequest == right.checkpointReleaseRequest
+           && left.checkpointLocal == right.checkpointLocal
            && left.entryIndex == right.entryIndex && left.squadCounts == right.squadCounts
            && left.authBody == right.authBody && left.sequenceOwner == right.sequenceOwner
            && left.sdkBuildSha256 == right.sdkBuildSha256 && left.kind == right.kind

@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <string_view>
 
+#include "../freecam/freecam.h"
 #include "../../../core/logging/log.h"
 #include "../../hooking/detour.h"
 #include "../../player/player_position.h"
@@ -40,6 +41,17 @@ constexpr std::string_view kControlledHandleText =
 constexpr auto kControlledHandlePattern =
     signature<signature_length(kControlledHandleText)>(kControlledHandleText);
 
+/**
+ * Reads the current camera out of the camera block: position, forward and up. The render view is
+ * built from what it returns, after the game's own camera layers have written the block, so it is
+ * where the spectator camera answers.
+ */
+constexpr std::string_view kCurrentCameraText =
+    "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 49 8B F8 48 8B F2 48 8B D9 E8 ? ? ? ? "
+    "48 8B C8 48 85 C0 0F 84";
+/** Compiled pattern bytes of the current camera getter signature. */
+constexpr auto kCurrentCamera = signature<signature_length(kCurrentCameraText)>(kCurrentCameraText);
+
 /** Runs per tick, writing the object placement from the rigid body. We must run before it. */
 constexpr std::string_view kPhysicsSyncText =
     "4C 8B DC 55 53 56 41 54 41 55 49 8D 6B A1 48 81 EC F0 00 00 00 48 8B 05 ? ? ? ? "
@@ -54,19 +66,22 @@ constexpr std::byte kNearCallOpcode{0xE8};
 constexpr std::size_t kNearCallOperand = 1;
 constexpr std::size_t kNearCallLength = 5;
 
-/** Both detours are installed together, so one slot each. */
-constexpr std::size_t kHandleCount = 2;
+/** The detours are installed together, so one slot each. */
+constexpr std::size_t kHandleCount = 3;
 constexpr std::size_t kCameraSlot = 0;
 constexpr std::size_t kPhysicsSlot = 1;
+constexpr std::size_t kCurrentSlot = 2;
 
 using CameraTransform = std::int64_t(__fastcall*)(std::uint32_t);
 using PhysicsSync = std::int64_t(__fastcall*)(std::byte*, std::byte*);
+using CurrentCamera = std::uint64_t(__fastcall*)(float*, float*, float*);
 
 std::array<hooking::detour::Handle, kHandleCount> g_handles{};
 std::atomic_bool g_installed{false};
 SRWLOCK g_lifecycleLock = SRWLOCK_INIT;
 std::atomic<CameraTransform> g_cameraOriginal{};
 std::atomic<PhysicsSync> g_physicsOriginal{};
+std::atomic<CurrentCamera> g_currentOriginal{};
 std::atomic_uint32_t g_calls{};
 
 struct Call final {
@@ -100,6 +115,8 @@ __declspec(noinline) std::int64_t __fastcall camera_transform(std::uint32_t play
     const Call call;
     const CameraTransform next = published(g_cameraOriginal);
     const std::int64_t result = next(playerIndex);
+    // The spectator camera replaces the pose first, so the pose the overlays read is the view's.
+    hooks::freecam::apply(playerIndex);
     capture_camera_pose(playerIndex);
     poll_request();
     force_pending();
@@ -130,6 +147,24 @@ __declspec(noinline) std::int64_t __fastcall physics_sync(std::byte* component,
     // This tick is the only one that sees every component, so it is where the player's is found.
     client::player::position::observe(component);
     return next(component, outFlags);
+}
+
+/**
+ * Answers the current camera with the spectator pose while it is on, else with the game's.
+ * @param position Receives three floats.
+ * @param forward Receives three floats.
+ * @param up Receives three floats.
+ * @return One when a camera was read, as the original does.
+ */
+__declspec(noinline) std::uint64_t __fastcall current_camera(float* position,
+                                                            float* forward,
+                                                            float* up) noexcept {
+    const Call call;
+    const CurrentCamera next = published(g_currentOriginal);
+    if (hooks::freecam::current(position, forward, up)) {
+        return 1;
+    }
+    return next(position, forward, up);
 }
 
 /**
@@ -184,6 +219,10 @@ bool install_locked() noexcept {
     if (sync == nullptr) {
         return fail("sync");
     }
+    std::byte* const current = scan_main_image_unique(kCurrentCamera, "teleport_current_camera");
+    if (current == nullptr) {
+        return fail("current_camera");
+    }
     const CameraSingleton singleton = singleton_from(transform);
     if (singleton == nullptr) {
         return fail("singleton");
@@ -192,6 +231,7 @@ bool install_locked() noexcept {
     const std::array<hooking::detour::Spec, kHandleCount> specs{
         hooking::detour::Spec{transform, reinterpret_cast<void*>(&camera_transform)},
         hooking::detour::Spec{sync, reinterpret_cast<void*>(&physics_sync)},
+        hooking::detour::Spec{current, reinterpret_cast<void*>(&current_camera)},
     };
     if (!hooking::detour::install(specs, g_handles)) {
         return fail("attach");
@@ -206,8 +246,11 @@ bool install_locked() noexcept {
                            std::memory_order_release);
     g_physicsOriginal.store(reinterpret_cast<PhysicsSync>(g_handles[kPhysicsSlot].original),
                             std::memory_order_release);
+    g_currentOriginal.store(reinterpret_cast<CurrentCamera>(g_handles[kCurrentSlot].original),
+                            std::memory_order_release);
     g_cameraOriginal.notify_all();
     g_physicsOriginal.notify_all();
+    g_currentOriginal.notify_all();
     g_installed.store(true, std::memory_order_release);
     core::log::write(
         core::log::Channel::client, core::log::Level::info, "ev=teleport stage=install result=ok");
@@ -236,6 +279,7 @@ bool uninstall_locked() noexcept {
     const std::array entries{
         hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&camera_transform)},
         hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&physics_sync)},
+        hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&current_camera)},
         hooking::detour::ProtectedCodeEntry{reinterpret_cast<void*>(&invoke_sync)},
     };
     if (hooking::detour::uninstall(g_handles, entries, &idle)
@@ -245,6 +289,7 @@ bool uninstall_locked() noexcept {
     }
     g_cameraOriginal.store(nullptr, std::memory_order_release);
     g_physicsOriginal.store(nullptr, std::memory_order_release);
+    g_currentOriginal.store(nullptr, std::memory_order_release);
     clear_targets();
     clear_action_keys();
     hooks::fly::reset();

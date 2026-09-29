@@ -4,8 +4,11 @@
 
 namespace sunrise::core::ui::memory {
 
-/** 8 MiB caps all Dear ImGui context, font, widget, and draw storage. */
-inline constexpr std::size_t kArenaCapacityBytes = 8'388'608;
+/**
+ * 16 MiB caps all Dear ImGui context, font, widget, and draw storage: the game's interface and
+ * the mission editor window's own context share it.
+ */
+inline constexpr std::size_t kArenaCapacityBytes = 16'777'216;
 
 /** Copied allocator counters. The arena storage itself is not exposed. */
 struct Stats {

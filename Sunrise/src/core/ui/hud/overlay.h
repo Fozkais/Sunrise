@@ -16,6 +16,8 @@ enum class Overlay : std::uint8_t {
     sensorEvents,
     /** What the mission script VM is doing, per attached activity. */
     missionScript,
+    /** The running mission's step, the zones it waits on, and those zones drawn in the world. */
+    missionSteps,
     count,
 };
 

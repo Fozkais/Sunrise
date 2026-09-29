@@ -9,6 +9,7 @@
 #include <memory>
 #include <new>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -81,6 +82,8 @@ enum class Handler : std::uint8_t {
     event,
     /** Runs once per attach that restored an already-started program, in place of start. */
     load,
+    /** Runs one developer command from the in-game mission panel. */
+    dev,
 };
 
 /** Native values available only while one callback is inside lua_pcall. */
@@ -88,6 +91,7 @@ struct CallFrame final {
     Candidate candidate{};
     const host::Event* event{};
     const host::ClientMessageSnapshot* clientMessage{};
+    const DevCommand* devCommand{};
     std::uint64_t now{};
     std::uint32_t remainingInstructions{kInstructionBudget};
     Handler handler{Handler::event};
@@ -142,6 +146,9 @@ struct Impl final {
     int startReference{LUA_NOREF};
     std::array<int, host::kEventKindCount> eventReferences{};
     int loadReference{LUA_NOREF};
+    int devReference{LUA_NOREF};
+    /** The program's `debug` description, copied at open for the in-game mission panel. */
+    std::string debugDescription{};
     bool hasInitialState{};
     bool active{};
     bool faulted{};
@@ -177,6 +184,8 @@ inline void attach_impl(lua_State* state, Impl& impl) noexcept {
         return impl.startReference;
     case Handler::load:
         return impl.loadReference;
+    case Handler::dev:
+        return impl.devReference;
     case Handler::event:
         return LUA_NOREF;
     }

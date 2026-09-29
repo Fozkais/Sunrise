@@ -438,6 +438,16 @@ struct DefinitionApi final {
 
 using Intent = state::activity::mission::TypedIntent;
 
+/** One developer command the in-game mission panel hands the running program. */
+struct DevCommand final {
+    /** Command word, such as `replay` or `cross`. */
+    std::array<char, 32> name{};
+    /** Step id the command names, or empty. */
+    std::array<char, 64> step{};
+    /** Slot id the command names, or empty. */
+    std::array<char, 64> slot{};
+};
+
 /** Stable program-open outcome. */
 enum class OpenStatus : std::uint8_t {
     ready,
@@ -503,6 +513,8 @@ private:
                               std::span<const Intent>) noexcept;
     friend CallStatus start(Vm&, std::uint64_t) noexcept;
     friend CallStatus load(Vm&, std::uint64_t) noexcept;
+    friend CallStatus dev_command(Vm&, const DevCommand&, std::uint64_t) noexcept;
+    friend std::string_view debug_description(const Vm&) noexcept;
     friend CallStatus
     dispatch(Vm&, const host::Event&, const host::ClientMessageSnapshot*, std::uint64_t) noexcept;
     friend bool handles_event(const Vm&, host::EventKind) noexcept;
@@ -578,6 +590,10 @@ void publish_ghost_levels(Vm& vm, std::span<const GhostLinkRow> levels) noexcept
  * It rebuilds only Lua-heap caches and reserves no revision.
  */
 [[nodiscard]] CallStatus load(Vm& vm, std::uint64_t now = 0) noexcept;
+/** Runs the optional on_dev_command(context, state, command) transaction. */
+[[nodiscard]] CallStatus dev_command(Vm& vm, const DevCommand& command, std::uint64_t now) noexcept;
+/** @return The program's optional `debug` description text; empty when it declares none. */
+[[nodiscard]] std::string_view debug_description(const Vm& vm) noexcept;
 /** Runs the optional callback for the event's exact native kind. */
 [[nodiscard]] CallStatus dispatch(Vm& vm,
                                   const host::Event& event,

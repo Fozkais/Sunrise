@@ -15,9 +15,11 @@ namespace sunrise::server::activity::mission {
  * region has no findable objects until it transitions. Message 12 is the only mid-activity move.
  * @param instance Runtime instance whose state selection just published.
  * @param plan Published plan naming the target region and its bubble.
+ * @param relocate True to move the client inside the region it already reports.
  */
 void arm_state_region_teleport(RuntimeInstance& instance,
-                               const server::bap::ActivityMissionSeedPlan& plan) noexcept {
+                               const server::bap::ActivityMissionSeedPlan& plan,
+                               const bool relocate) noexcept {
     namespace membership = ::sunrise::state::activity::membership;
     const auto& destination = instance.view.binding.destination;
     // A public region is shared by every player in it, and its programs select a zone's state
@@ -34,8 +36,9 @@ void arm_state_region_teleport(RuntimeInstance& instance,
         return;
     }
     const std::int32_t reported = membership::player_region(instance.view.binding.sessionId);
-    // A sibling-state transition still needs the host teleport to order the spawn.
-    if (reported == static_cast<std::int32_t>(plan.effectiveRegion)) {
+    // A sibling-state transition still needs the host teleport to order the spawn. A move to
+    // another area of the same region, named by its spawn set, needs it too.
+    if (reported == static_cast<std::int32_t>(plan.effectiveRegion) && !relocate) {
         // Already there. Clear any earlier arm so the mirror owns the block again.
         static_cast<void>(membership::arm_host_teleport(
             instance.view.binding.sessionId, membership::kAbsentSliceSetIndex, 0));

@@ -136,4 +136,20 @@ void apply_pending(void* component) noexcept;
 /** Reads the native controlled handle for local-player ownership checks. */
 [[nodiscard]] bool current_controlled_handle(std::uint32_t& handle) noexcept;
 
+/**
+ * Moves the local player to one world position on the next physics tick that carries them. It
+ * works whether or not the teleport key is enabled; a newer request replaces an unserved one.
+ */
+void request_move_to(const Vector& position) noexcept;
+
+/** Reads one player's camera pose straight from the pose block. Camera-hook thread only. */
+[[nodiscard]] bool read_camera_pose(std::uint32_t playerIndex, CameraPose& pose) noexcept;
+
+/**
+ * Writes one player's camera position and basis into the pose block the game just computed, so
+ * the frame renders from there. The field of view and aspect stay the game's. Camera-hook thread
+ * only.
+ */
+[[nodiscard]] bool write_camera_pose(std::uint32_t playerIndex, const CameraPose& pose) noexcept;
+
 } // namespace sunrise::client::hooks::teleport

@@ -14,11 +14,14 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
 #include "../../../core/logging/log.h"
 #include "../../../core/settings/settings.h"
+#include "../../../state/activity/mission/activity_section.h"
 #include "../../../state/activity/mission/runtime.h"
 #include "../../../state/activity/runtime.h"
 #include "../../bap/runtime.h"
@@ -26,6 +29,7 @@
 #include "../host_runtime.h"
 #include "mission_script_event_batch.h"
 #include "mission_script_runtime_internal.h"
+#include "mission_script_sdk_bridge.h"
 #include "mission_script_vm.h"
 
 namespace sunrise::server::activity::mission {
@@ -37,6 +41,9 @@ namespace {
 SRWLOCK g_lock{SRWLOCK_INIT};
 bool g_enabled{};
 bool g_pathReady{};
+/** The one developer command waiting for an idle program; it outlives a reload. */
+lua_vm::DevCommand g_devCommand{};
+bool g_devCommandPending{};
 
 static_assert(mission_state::kSquadMemberCapacity == lua_vm::kSquadMemberCapacity);
 
@@ -396,6 +403,9 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
         server::gameplay::squad_entity_retirement::cancel_placed_transition(
             instance.view.binding, instance.view.activityClientGeneration);
         clear_pending_events(instance.view.binding);
+        // A mission's section ends with it; a reload or a reattach keeps it.
+        ::sunrise::state::activity::mission::activity_section::clear(
+            instance.view.binding.sessionId);
     } else if (instance.occupied) {
         reset_pending_events_for_reattach(instance.view.binding);
     }
@@ -414,6 +424,7 @@ void clear_instance(RuntimeInstance& instance, bool clearPending) noexcept {
     instance.intentsTransportStaged = 0;
     instance.lastEventSequence = 0;
     instance.lastLoggedRevision = 0;
+    instance.variablesLogged = 0;
     instance.lastMissionSequence = 0;
     instance.missionPhase = 0;
     instance.missionStateRevision = 0;
@@ -566,6 +577,93 @@ void fault_instance(RuntimeInstance& instance, std::string_view reason) noexcept
     persist_mission_fault(instance);
 }
 
+namespace {
+
+/** Variable counts whose first crossing is logged; the last leaves six rows of headroom. */
+constexpr std::size_t kVariableCap = mission_state::kVariableCapacity;
+constexpr std::array<std::size_t, 7> kVariableBands{kVariableCap / 2,
+                                                    kVariableCap * 3 / 4,
+                                                    kVariableCap * 7 / 8,
+                                                    kVariableCap * 15 / 16,
+                                                    kVariableCap * 31 / 32,
+                                                    kVariableCap * 63 / 64,
+                                                    kVariableCap - 6};
+
+/** One key family: the leading segment of a variable name, three for a flow's own rows. */
+struct VariableFamily final {
+    std::string_view name{};
+    std::size_t count{};
+};
+
+/** @return The family a durable variable name belongs to. */
+std::string_view variable_family(const mission_state::StateKey& key) noexcept {
+    const std::string_view text(key.bytes.data(), key.length);
+    const std::size_t wanted = text.starts_with("flow.") ? 3 : 1;
+    std::size_t breaks = 0;
+    for (std::size_t index = 0; index < text.size(); ++index) {
+        if ((text[index] == '.' || text[index] == '/') && ++breaks == wanted) {
+            return text.substr(0, index);
+        }
+    }
+    return text;
+}
+
+/**
+ * Reports the script variable table as it crosses each band toward its capacity, with the
+ * families that fill it, so a mission that fills the table can be trimmed where it is spent.
+ */
+void note_variable_pressure(RuntimeInstance& instance,
+                            std::span<const mission_state::ScriptVariable> variables) noexcept {
+    std::size_t band = 0;
+    for (const std::size_t threshold : kVariableBands) {
+        if (variables.size() >= threshold) {
+            band = threshold;
+        }
+    }
+    if (band <= instance.variablesLogged) {
+        instance.variablesLogged = band;
+        return;
+    }
+    instance.variablesLogged = band;
+    std::array<VariableFamily, 48> families{};
+    std::size_t used = 0;
+    std::size_t other = 0;
+    for (const mission_state::ScriptVariable& variable : variables) {
+        const std::string_view name = variable_family(variable.key);
+        std::size_t slot = 0;
+        while (slot < used && families[slot].name != name) {
+            ++slot;
+        }
+        if (slot == used) {
+            if (used == families.size()) {
+                ++other;
+                continue;
+            }
+            families[used++].name = name;
+        }
+        ++families[slot].count;
+    }
+    std::sort(families.begin(),
+              families.begin() + static_cast<std::ptrdiff_t>(used),
+              [](const VariableFamily& left, const VariableFamily& right) {
+                  return left.count > right.count;
+              });
+    std::string fields = "variables=" + std::to_string(variables.size()) + " capacity="
+                         + std::to_string(mission_state::kVariableCapacity) + " families=";
+    for (std::size_t index = 0; index < used && index < 14; ++index) {
+        fields += index == 0 ? "" : ",";
+        fields += families[index].name;
+        fields += '=';
+        fields += std::to_string(families[index].count);
+    }
+    if (other != 0) {
+        fields += ",other=" + std::to_string(other);
+    }
+    log_line(core::log::Level::warn, &instance, "variables", "pressure", fields);
+}
+
+} // namespace
+
 /** Commits the VM's phase/revision/start transaction into exact server-owned State. */
 bool commit_mission_state(RuntimeInstance& instance,
                           bool started,
@@ -616,6 +714,7 @@ bool commit_mission_state(RuntimeInstance& instance,
                                                                transaction,
                                                                snapshot);
     if (status == mission_state::Status::ready) {
+        note_variable_pressure(instance, {variables.data(), variableCount});
         const std::uint32_t previousPhase = instance.missionPhase;
         accept_mission_state(instance, snapshot);
         if (instance.missionPhase != previousPhase) {
@@ -819,6 +918,109 @@ template <typename Step> void timed_step(const char* name, Step&& step) noexcept
     }
 }
 
+/** Copies one field into a fixed command buffer. @return False when it does not fit. */
+template <std::size_t N>
+[[nodiscard]] bool copy_field(std::array<char, N>& output, std::string_view value) noexcept {
+    output = {};
+    if (value.size() >= N) {
+        return false;
+    }
+    std::copy(value.begin(), value.end(), output.begin());
+    return true;
+}
+
+/** @return One committed variable value written out as text. */
+[[nodiscard]] std::string variable_text(const mission_state::VariableValue& value) {
+    switch (value.kind) {
+    case mission_state::VariableValueKind::boolean:
+        return value.booleanValue ? "true" : "false";
+    case mission_state::VariableValueKind::integer:
+        return std::to_string(value.integerValue);
+    case mission_state::VariableValueKind::real:
+        return std::to_string(value.realValue);
+    case mission_state::VariableValueKind::string:
+        return {value.stringValue.data(),
+                (std::min)(static_cast<std::size_t>(value.stringLength), value.stringValue.size())};
+    }
+    return {};
+}
+
+/**
+ * Writes a program description out with each `{id}` token replaced by the authored name the pinned
+ * SDK view gives that slot, squad or scene; a token it cannot name is kept as written.
+ */
+[[nodiscard]] std::string expand_names(const lua_vm::DefinitionApi& api, std::string_view text) {
+    std::string output{};
+    output.reserve(text.size());
+    std::size_t cursor = 0;
+    while (cursor < text.size()) {
+        const std::size_t open = text.find('{', cursor);
+        const std::size_t close = open == std::string_view::npos ? open : text.find('}', open);
+        if (close == std::string_view::npos) {
+            output.append(text.substr(cursor));
+            break;
+        }
+        output.append(text.substr(cursor, open - cursor));
+        const std::string_view token = text.substr(open + 1, close - open - 1);
+        std::string_view name{};
+        if (token.starts_with("slot/")) {
+            lua_vm::SlotDefinition slot{};
+            if (api.resolveSlotId != nullptr && api.resolveSlotId(api.context, token, slot)) {
+                name = slot.name;
+            }
+        } else if (token.starts_with("squad/")) {
+            lua_vm::SquadDefinition squad{};
+            if (api.resolveSquadId != nullptr && api.resolveSquadId(api.context, token, squad)) {
+                name = squad.name;
+            }
+        } else if (token.starts_with("symbol/")) {
+            lua_vm::SceneDefinition scene{};
+            lua_vm::SlotDefinition slot{};
+            if (api.resolveSceneId != nullptr && api.resolveSlotRow != nullptr
+                && api.resolveSceneId(api.context, token, scene)
+                && api.resolveSlotRow(api.context, scene.slotRow, slot)) {
+                name = slot.name;
+            }
+        }
+        output.append(name.empty() ? token : name);
+        cursor = close + 1;
+    }
+    return output;
+}
+
+/** Runs the waiting developer command in the first program that is started and idle. */
+void service_dev_command(std::uint64_t now) noexcept {
+    if (!g_devCommandPending) {
+        return;
+    }
+    for (RuntimeInstance& instance : g_instances) {
+        if (!instance.occupied) {
+            continue;
+        }
+        lua_vm::Intent pendingIntent{};
+        if (instance.programStatus != ProgramStatus::loaded || !instance.missionStarted
+            || instance.startPending || instance.deliveryStage != DeliveryStage::idle
+            || lua_vm::pending_intent(instance.vm, pendingIntent)) {
+            return;
+        }
+        g_devCommandPending = false;
+        const lua_vm::CallStatus status = lua_vm::dev_command(instance.vm, g_devCommand, now);
+        note_vm_status(instance, "dev", lua_vm::status_name(status));
+        log_line(core::log::Level::info,
+                 &instance,
+                 "dev_command",
+                 lua_vm::status_name(status),
+                 {},
+                 g_devCommand.name.data());
+        if (status == lua_vm::CallStatus::committed || status == lua_vm::CallStatus::noHandler) {
+            static_cast<void>(commit_mission_state(instance, true, instance.lastMissionSequence));
+        } else if (status != lua_vm::CallStatus::inactive) {
+            persist_mission_fault(instance);
+        }
+        return;
+    }
+}
+
 } // namespace
 
 /**
@@ -838,6 +1040,7 @@ void service(std::uint64_t now) noexcept {
     timed_step("scriptless", [] { retire_scriptless_inputs(); });
     timed_step("timers", [now] { service_timers(now); });
     timed_step("script_events", [now] { service_script_events(now); });
+    timed_step("dev_command", [now] { service_dev_command(now); });
     timed_step("dispatch", [now] {
         for (RuntimeInstance& instance : g_instances) {
             if (instance.occupied) {
@@ -850,6 +1053,96 @@ void service(std::uint64_t now) noexcept {
         }
     });
     ReleaseSRWLockExclusive(&g_lock);
+}
+
+bool dev_view(DevView& output) noexcept {
+    output = {};
+    AcquireSRWLockShared(&g_lock);
+    bool found = false;
+    try {
+        for (const RuntimeInstance& instance : g_instances) {
+            if (!instance.occupied) {
+                continue;
+            }
+            found = true;
+            output.binding = instance.view.binding;
+            output.running = instance.programStatus == ProgramStatus::loaded
+                             && instance.missionStarted && !instance.startPending;
+            output.attemptGeneration = instance.attempt.generation;
+            output.stateRevision = instance.missionStateRevision;
+            output.commandPending = g_devCommandPending;
+            output.description =
+                expand_names(sdk_bridge::definition_api(instance.view, instance.worldView),
+                             lua_vm::debug_description(instance.vm));
+            lua_vm::Snapshot diagnostics{};
+            lua_vm::snapshot(instance.vm, diagnostics);
+            output.lastError = diagnostics.lastError;
+            output.faulted = diagnostics.faulted;
+            std::array<lua_vm::ScriptVariable, lua_vm::kVariableCapacity> variables{};
+            std::array<lua_vm::MissionTimer, lua_vm::kTimerCapacity> timers{};
+            std::size_t variableCount = 0;
+            std::size_t timerCount = 0;
+            std::uint64_t nextTimerSequence = 0;
+            std::uint64_t nextIntentKey = 0;
+            if (lua_vm::snapshot_durable_state(instance.vm,
+                                               variables,
+                                               variableCount,
+                                               timers,
+                                               timerCount,
+                                               nextTimerSequence,
+                                               nextIntentKey)) {
+                output.variables.reserve(variableCount);
+                for (std::size_t index = 0; index < variableCount; ++index) {
+                    const lua_vm::ScriptVariable& row = variables[index];
+                    output.variables.push_back({std::string(row.key.bytes.data(), row.key.length),
+                                                variable_text(row.value)});
+                }
+            }
+            break;
+        }
+    } catch (const std::bad_alloc&) {
+        found = false;
+    }
+    ReleaseSRWLockShared(&g_lock);
+    return found;
+}
+
+void cancel_dev_command() noexcept {
+    AcquireSRWLockExclusive(&g_lock);
+    g_devCommandPending = false;
+    g_devCommand = {};
+    ReleaseSRWLockExclusive(&g_lock);
+}
+
+std::uint32_t first_activity_row() noexcept {
+    AcquireSRWLockShared(&g_lock);
+    std::uint32_t row = 0;
+    for (const RuntimeInstance& instance : g_instances) {
+        if (instance.occupied && instance.view.activityRow != format::kAbsentIndex) {
+            row = instance.view.activityRow + 1;
+            break;
+        }
+    }
+    ReleaseSRWLockShared(&g_lock);
+    return row;
+}
+
+bool queue_dev_command(std::string_view name,
+                       std::string_view step,
+                       std::string_view slot) noexcept {
+    lua_vm::DevCommand command{};
+    if (name.empty() || !copy_field(command.name, name) || !copy_field(command.step, step)
+        || !copy_field(command.slot, slot)) {
+        return false;
+    }
+    AcquireSRWLockExclusive(&g_lock);
+    const bool queued = !g_devCommandPending;
+    if (queued) {
+        g_devCommand = command;
+        g_devCommandPending = true;
+    }
+    ReleaseSRWLockExclusive(&g_lock);
+    return queued;
 }
 
 /** Copies every open instance row and every retained attach row for the panel. */

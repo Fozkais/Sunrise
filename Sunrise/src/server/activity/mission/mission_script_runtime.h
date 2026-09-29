@@ -4,6 +4,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "../../../state/activity/definition.h"
 
@@ -95,11 +98,48 @@ void report_squad_provoked(const state::activity::SessionBinding& binding,
                            std::uint32_t registryKey,
                            std::uint16_t slotIndex) noexcept;
 
+/** One committed mission variable, its value written out as text. */
+struct DevVariable final {
+    std::string key{};
+    std::string value{};
+};
+
+/** What the in-game mission panel shows of the first running mission program. */
+struct DevView final {
+    state::activity::SessionBinding binding{};
+    /** The program's `debug` description; empty when it declares none. */
+    std::string description{};
+    std::vector<DevVariable> variables{};
+    std::array<char, 256> lastError{};
+    std::uint64_t attemptGeneration{};
+    std::uint64_t stateRevision{};
+    bool running{};
+    bool faulted{};
+    /** A developer command waits for the program to be idle. */
+    bool commandPending{};
+};
+
+/** Copies the first open program for the in-game mission panel, without invoking Lua. */
+[[nodiscard]] bool dev_view(DevView& output) noexcept;
+/**
+ * Queues one developer command for the first open program. It runs as on_dev_command once that
+ * program is started and idle, so a command queued before a reload runs in the reloaded program.
+ * @return False when a command is already waiting or a field does not fit.
+ */
+[[nodiscard]] bool
+queue_dev_command(std::string_view name, std::string_view step, std::string_view slot) noexcept;
+/** Drops the developer command still waiting, such as one a program that no longer opens holds. */
+void cancel_dev_command() noexcept;
+
 /** Starts the optional, off-by-default server mission-script manager. */
 void initialize() noexcept;
 /** Writes the authored controller path, `<name>/<name>.lua`, for one 1-based SDK activity row. */
 [[nodiscard]] bool controller_file_name(std::uint32_t oneBasedActivityRow,
                                         std::span<char> output) noexcept;
+/** Writes the folder mission scripts load from, `<artifacts>\scripts`. */
+[[nodiscard]] bool script_root(std::wstring& output) noexcept;
+/** @return The 1-based SDK activity row of the first open program, or zero. */
+[[nodiscard]] std::uint32_t first_activity_row() noexcept;
 /** Runs one bounded event/reducer/output slice after Activity Host ingress. */
 void service(std::uint64_t now) noexcept;
 /** Copies mission-program state without invoking Lua or changing delivery state. */

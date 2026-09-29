@@ -60,6 +60,11 @@ std::atomic<std::byte*> g_playerComponent{nullptr};
 /** Frames left before the injected press is released. */
 std::atomic_uint32_t g_pressFrames{0};
 
+/** One move to an absolute position, waiting for the player's physics. */
+std::atomic_bool g_moveToRequested{false};
+SRWLOCK g_moveToLock{SRWLOCK_INIT};
+Vector g_moveToTarget{};
+
 std::atomic<ControlledHandle> g_controlledHandle{};
 std::atomic<CameraSingleton> g_cameraSingleton{};
 
@@ -290,6 +295,42 @@ void set_vertical_velocity(std::byte* body, float value) noexcept {
 }
 
 /**
+ * Places the body at the requested position with no velocity, then wakes it the way the key does.
+ * @param body Rigid body being moved.
+ * @return True when the new position was stored.
+ */
+[[nodiscard]] bool move_body_to(std::byte* body) noexcept {
+    Vector target{};
+    AcquireSRWLockShared(&g_moveToLock);
+    target = g_moveToTarget;
+    ReleaseSRWLockShared(&g_moveToLock);
+    std::array<float, kVectorLanes> position{};
+    if (!read_at(body + kBodyPositionX, position) || !write_vector(body + kBodyPositionX, target)) {
+        report_skip("body");
+        return false;
+    }
+    (void)write_vector(body + kBodyVelocityX, {});
+    begin_press();
+    std::array<char, 160> line{};
+    const int written = std::snprintf(line.data(),
+                                      line.size(),
+                                      "ev=teleport stage=move_to result=ok "
+                                      "from=%.1f,%.1f,%.1f to=%.1f,%.1f,%.1f",
+                                      static_cast<double>(position[0]),
+                                      static_cast<double>(position[1]),
+                                      static_cast<double>(position[2]),
+                                      static_cast<double>(target[0]),
+                                      static_cast<double>(target[1]),
+                                      static_cast<double>(target[2]));
+    if (written > 0) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::info,
+                         {line.data(), static_cast<std::size_t>(written)});
+    }
+    return true;
+}
+
+/**
  * Runs the whole move for a component already proved to be the player's.
  * @param component Physics component driving the player.
  * @return True when the body was found and its position was written.
@@ -359,6 +400,32 @@ void capture_camera_pose(std::uint32_t playerIndex) noexcept {
     g_forwardValid.store(true, std::memory_order_release);
 }
 
+/** @return The pose block of one player's camera, or null. */
+[[nodiscard]] std::byte* camera_block(std::uint32_t playerIndex) noexcept {
+    const auto singleton = g_cameraSingleton.load(std::memory_order_acquire);
+    if (playerIndex == kInvalidHandle || singleton == nullptr) {
+        return nullptr;
+    }
+    std::byte* const camera = singleton();
+    return camera == nullptr ? nullptr : camera + kCameraBlockStride * playerIndex;
+}
+
+bool read_camera_pose(std::uint32_t playerIndex, CameraPose& pose) noexcept {
+    std::byte* const block = camera_block(playerIndex);
+    return block != nullptr && read_at(block + kCameraPositionX, pose.position)
+           && read_at(block + kCameraForwardX, pose.forward)
+           && read_at(block + kCameraUpX, pose.up)
+           && read_at(block + kCameraHorizontalFov, pose.horizontalFov)
+           && read_at(block + kCameraAspect, pose.aspect);
+}
+
+bool write_camera_pose(std::uint32_t playerIndex, const CameraPose& pose) noexcept {
+    std::byte* const block = camera_block(playerIndex);
+    return block != nullptr && write_vector(block + kCameraPositionX, pose.position)
+           && write_vector(block + kCameraForwardX, pose.forward)
+           && write_vector(block + kCameraUpX, pose.up);
+}
+
 /** Latches one teleport request if the bound key went down this frame. */
 void poll_request() noexcept {
     end_press();
@@ -387,14 +454,15 @@ void poll_request() noexcept {
 
 /** Moves the local player if a request is pending and this component owns them. */
 void apply_pending(void* component) noexcept {
-    if (!g_active.load(std::memory_order_relaxed) || component == nullptr
+    const bool moveTo = g_moveToRequested.load(std::memory_order_acquire);
+    if ((!g_active.load(std::memory_order_relaxed) && !moveTo) || component == nullptr
         || g_controlledHandle == nullptr) {
         return;
     }
     const bool requested = g_requested.load(std::memory_order_acquire);
     // The ownership test runs per component, so it is paid only while a request is open or until
     // the player's component is known. Once it is known, an ordinary tick costs two atomic reads.
-    if (!requested && g_playerComponent.load(std::memory_order_relaxed) != nullptr) {
+    if (!requested && !moveTo && g_playerComponent.load(std::memory_order_relaxed) != nullptr) {
         return;
     }
     if (!owns_player(static_cast<std::byte*>(component))) {
@@ -402,6 +470,16 @@ void apply_pending(void* component) noexcept {
     }
     std::byte* const physics = static_cast<std::byte*>(component);
     g_playerComponent.store(physics, std::memory_order_relaxed);
+    if (moveTo && g_moveToRequested.exchange(false, std::memory_order_acq_rel)) {
+        std::byte* const body = body_of(physics);
+        if (body != nullptr) {
+            (void)move_body_to(body);
+        }
+        return;
+    }
+    if (!g_active.load(std::memory_order_relaxed)) {
+        return;
+    }
     if (!requested || !g_forwardValid.load(std::memory_order_acquire)) {
         return;
     }
@@ -411,6 +489,17 @@ void apply_pending(void* component) noexcept {
 
 /** Runs the move for a request no physics tick collected. */
 void force_pending() noexcept {
+    // A player at rest gets no physics tick, so a move-to is served from the cached component.
+    if (g_moveToRequested.load(std::memory_order_acquire)) {
+        std::byte* const physics = g_playerComponent.load(std::memory_order_relaxed);
+        if (physics != nullptr && g_controlledHandle != nullptr && owns_player(physics)
+            && g_moveToRequested.exchange(false, std::memory_order_acq_rel)) {
+            std::byte* const body = body_of(physics);
+            if (body != nullptr && move_body_to(body)) {
+                invoke_sync(physics);
+            }
+        }
+    }
     if (!g_requested.load(std::memory_order_acquire)
         || !g_forwardValid.load(std::memory_order_acquire)
         || g_requestAge.load(std::memory_order_relaxed) < kForceAfterFrames) {
@@ -428,6 +517,14 @@ void force_pending() noexcept {
     invoke_sync(physics);
     core::log::write(
         core::log::Channel::client, core::log::Level::info, "ev=teleport stage=force result=ok");
+}
+
+/** Latches one move to an absolute world position. */
+void request_move_to(const Vector& position) noexcept {
+    AcquireSRWLockExclusive(&g_moveToLock);
+    g_moveToTarget = position;
+    ReleaseSRWLockExclusive(&g_moveToLock);
+    g_moveToRequested.store(true, std::memory_order_release);
 }
 
 /** Reports the physics component the local player was last seen driving. */

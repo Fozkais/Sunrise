@@ -11,6 +11,7 @@
 #include "overlay.h"
 #include "overlays/ui_hud_logo_overlay.h"
 #include "overlays/ui_hud_mission_script_overlay.h"
+#include "overlays/ui_hud_mission_steps_overlay.h"
 #include "overlays/ui_hud_sensor_events_overlay.h"
 #include "overlays/ui_hud_session_overlay.h"
 #include "overlays/ui_hud_status_overlay.h"
@@ -61,6 +62,11 @@ constexpr std::array<Entry, kOverlayCount> kOverlays{
           "mission_script",
           "##sunrise_hud_mission_script",
           &overlays::mission_script::draw,
+          false},
+    Entry{"Mission Steps",
+          "mission_steps",
+          "##sunrise_hud_mission_steps",
+          &overlays::mission_steps::draw,
           false},
 };
 

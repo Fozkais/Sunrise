@@ -1,6 +1,7 @@
 #include <Windows.h>
 
 #include <array>
+#include <atomic>
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
@@ -16,7 +17,9 @@
 #include "../../../../steam/interfaces/invitations.h"
 #include "../../../ui/activity/authored_placement_marker.h"
 #include "../../../ui/activity/authored_spatial_overlay.h"
+#include "../../../ui/activity/mission_zone_overlay.h"
 #include "../../../ui/mission_launch/mission_launch_art.h"
+#include "../../freecam/freecam.h"
 #include "../../teleport/runtime.h"
 #include "../input/input.h"
 #include "graphics_renderer_report.h"
@@ -213,14 +216,43 @@ void render_frame_locked() noexcept {
     const bool markerDrawn = markerSourceReady
                              && sunrise::client::ui::activity::authored_placement_marker::draw(
                                  markerSource, markerCamera, !spatialMarkerDrawn);
+    // The mission's trigger volumes follow the Mission Steps overlay switch.
+    sunrise::client::hooks::teleport::CameraPose zoneCamera{};
+    const bool missionZonesDrawn =
+        visibility.enabled && core::ui::hud::enabled(core::ui::hud::Overlay::missionSteps)
+        && sunrise::client::hooks::teleport::camera_pose(zoneCamera)
+        && sunrise::client::ui::activity::mission_zone_overlay::draw(
+            g_resources.device, g_resources.context, g_resources.renderTarget, zoneCamera);
     if (!hudDrawn && !surfaceDrawn && !busyDrawn && !noticeDrawn && !spatialMarkerDrawn
-        && !markerDrawn && !invitationDrawn) {
+        && !markerDrawn && !invitationDrawn && !missionZonesDrawn) {
         // A frame nobody claimed still drains backend state, and sends no draw data.
         ImGui::EndFrame();
         return;
     }
     ImGui::Render();
     draw_data(ImGui::GetDrawData());
+}
+
+bool lock_interface(const std::atomic_bool& abandon) noexcept {
+    // The game's render thread takes this lock every frame, so a short wait always ends; the
+    // abandon flag lets a shutdown that already holds it stop the wait.
+    for (unsigned attempt = 0;; ++attempt) {
+        if (TryAcquireSRWLockExclusive(&g_rendererLock) != FALSE) {
+            return true;
+        }
+        if (abandon.load(std::memory_order_acquire)) {
+            return false;
+        }
+        if (attempt % 64 == 63) {
+            Sleep(1);
+        } else {
+            SwitchToThread();
+        }
+    }
+}
+
+void unlock_interface() noexcept {
+    ReleaseSRWLockExclusive(&g_rendererLock);
 }
 
 /** Feeds one ordinary window message into the active Dear ImGui context. */
@@ -237,9 +269,15 @@ bool handle_window_message(HWND window, UINT message, WPARAM word, LPARAM value)
         visibility.visible || steam::interfaces::methods::pending_invitation(invitation);
     transition_input_visibility_locked(inputVisible);
     if (!inputVisible) {
-        // Hidden input stays with the game and never enters Dear ImGui's event queue.
+        // Hidden input stays with the game and never enters Dear ImGui's event queue, unless the
+        // spectator camera is on: then the game gets none of it, so the player stays still.
+        const bool flying = freecam::enabled();
+        if (flying && message == WM_INPUT) {
+            freecam::observe_raw_input(reinterpret_cast<HRAWINPUT>(value));
+        }
         ReleaseSRWLockExclusive(&g_rendererLock);
-        return false;
+        return flying
+               && (is_mouse_input(message) || is_keyboard_input(message) || is_raw_input(message));
     }
 
     (void)ImGui_ImplWin32_WndProcHandler(window, message, word, value);

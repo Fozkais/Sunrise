@@ -6,6 +6,7 @@
 #include <limits>
 
 #include "../../runtime/storage/internal.h"
+#include "continuation.h"
 #include "internal.h"
 #include "runtime.h"
 
@@ -307,6 +308,8 @@ Status acknowledge_intent_output(const SessionBinding& binding,
             || device->sourceGeneration == 0)) {
         status = Status::intentMismatch;
     }
+    // Activity the completing intent asks the client to continue into; none by default.
+    std::int16_t nextActivity = -1;
     if (status == Status::ready) {
         MissionState candidate{};
         if (!copy_mission_state(record->mission, candidate)) {
@@ -345,6 +348,7 @@ Status acknowledge_intent_output(const SessionBinding& binding,
                 && pending->value.lifetimeState == kCompletedLifetimeState
                 && pending->value.attemptGeneration == candidate.attempt.generation) {
                 candidate.attempt.complete = true;
+                nextActivity = pending->value.continuationActivity;
             }
             candidate.pendingIntents.erase(candidate.pendingIntents.begin());
             if (status == Status::ready) {
@@ -352,6 +356,10 @@ Status acknowledge_intent_output(const SessionBinding& binding,
                     status = Status::revisionExhausted;
                 } else {
                     record->mission = std::move(candidate);
+                    if (nextActivity >= 0) {
+                        continuation::request(
+                            binding.sessionId, binding.createdRevision, nextActivity);
+                    }
                 }
             }
         }

@@ -484,6 +484,9 @@ void complete_delivery(RuntimeInstance& instance) noexcept {
     case lua_vm::IntentKind::holdSpawn:
         result = "spawn_hold_staged";
         break;
+    case lua_vm::IntentKind::setSection:
+        result = "section_staged";
+        break;
     case lua_vm::IntentKind::fireTrigger:
         result = "trigger_staged";
         break;

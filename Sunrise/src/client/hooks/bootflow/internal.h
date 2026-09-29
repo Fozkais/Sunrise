@@ -20,6 +20,16 @@ using patterns::signature_length;
 void uninstall_world_step() noexcept;
 
 /**
+ * Detours the client's loading-cinematics switch so that it answers true while an activity
+ * continuation is under way; otherwise it answers as shipped.
+ * @return True when the target was found and the detour attached.
+ */
+[[nodiscard]] bool install_loading_suppression() noexcept;
+
+/** Detaches the loading-cinematics detour. */
+void uninstall_loading_suppression() noexcept;
+
+/**
  * Attaches the read-only lifetime gate probe, a diagnostic on step 38's joinability gate.
  * @return True when the reader and its helpers were found and the detour attached.
  */

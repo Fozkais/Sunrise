@@ -10,6 +10,7 @@
 
 #include "../../../middleware/content/packages/tables/scenario_reader.h"
 #include "../../../state/activity/membership/activity_membership_query.h"
+#include "../../../state/activity/mission/activity_section.h"
 #include "../../../state/build_data/runtime.h"
 #include "../../../state/build_data/spawn_sets/spawn_set_catalog.h"
 #include "../../gameplay/squad_entity_retirement.h"
@@ -222,10 +223,16 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
                             host::EffectOutcome::refused);
             return;
         }
+        // A spawn set named for the state the client already holds is a relocation inside that
+        // region: the held state publishes nothing new, so only the teleport is owed.
+        const bool relocation =
+            intent.checkpointSpawnHash != 0
+            && state::activity::membership::player_region(instance.view.binding.sessionId)
+                   == intent.effectiveRegion;
         // The selected effective region is an authored-state key, not a region the client reports.
         // Publishing this lease revision is the completion edge, except when publication waits for
         // arrival: there the teleport is armed first, because arrival closes that window.
-        if (!selected.regionArrivalPending
+        if (!relocation && !selected.regionArrivalPending
             && (selected.publicationPending || selected.revision == 0
                 || selected.publishedRevision != selected.revision)) {
             report_intent_status(
@@ -234,8 +241,13 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
         }
         // A selected state names its own slice-set region. Until the client transitions there its
         // object registry comes from the loaded slice-set entry, so the new state's objects stay
-        // unfindable. Arming the host teleport is the only mid-activity move.
-        arm_state_region_teleport(instance, selected.plan);
+        // unfindable. Arming the host teleport is the only mid-activity move. A spawn set named
+        // by the script replaces the declared one first, so the move lands there.
+        if (intent.checkpointSpawnHash != 0) {
+            ::sunrise::state::activity::membership::note_declared_spawn_set(
+                instance.view.binding.sessionId, intent.checkpointSpawnHash);
+        }
+        arm_state_region_teleport(instance, selected.plan, relocation);
         static_cast<void>(complete_local_effect(instance, "state_selected"));
         return;
     }
@@ -247,6 +259,13 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
             complete_local_effect(instance, intent.active ? "spawn_held" : "spawn_released"));
         return;
     }
+    case lua_vm::IntentKind::setSection: {
+        // The next roster body's lifetime Auth carries it.
+        ::sunrise::state::activity::mission::activity_section::set(
+            instance.view.binding.sessionId, intent.registryKey);
+        static_cast<void>(complete_local_effect(instance, "section_set"));
+        return;
+    }
     case lua_vm::IntentKind::restartCheckpoint: {
         if (intent.checkpointReleaseRequest == 0
             && instance.attempt.generation == (std::numeric_limits<std::uint64_t>::max)()) {
@@ -254,6 +273,11 @@ void dispatch_intent(RuntimeInstance& instance, std::uint64_t now) noexcept {
                             "checkpoint_refused",
                             "attempt_generation_exhausted",
                             host::EffectOutcome::refused);
+            return;
+        }
+        // Acknowledging the head opens the next attempt; nothing reaches the client.
+        if (intent.checkpointLocal) {
+            static_cast<void>(complete_local_effect(instance, "checkpoint_dev_restart"));
             return;
         }
         if (intent.checkpointReleaseRequest != 0) {

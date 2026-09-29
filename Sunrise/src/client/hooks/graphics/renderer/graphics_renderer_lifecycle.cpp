@@ -4,6 +4,7 @@
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
 
+#include "../../../../server/ui/mission_editor/mission_editor_window.h"
 #include "../../../../core/ui/layout/layout.h"
 #include "../../../../core/ui/runtime/ui_visibility_runtime.h"
 #include "../../../../steam/interfaces/invitations.h"
@@ -121,6 +122,8 @@ constexpr std::array<ViewFormat, 6> kTypelessViewFormats{
     if (wait_for_capture_release(resources)) {
         return false;
     }
+    // The editor window's interface context lives in the same fixed arena, so it goes first.
+    server::ui::mission_editor::window::shutdown_locked();
     if (resources.inputInstalled) {
         if (!input::uninstall_raw_input_window()) {
             return false;

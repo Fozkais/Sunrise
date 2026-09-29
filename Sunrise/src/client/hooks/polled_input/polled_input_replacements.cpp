@@ -13,6 +13,7 @@
 #include <intrin.h>
 
 #include "../../diagnostics/module_range.h"
+#include "../freecam/freecam.h"
 #include "runtime.h"
 
 namespace sunrise::client::hooks::polled_input {
@@ -29,6 +30,11 @@ std::atomic_uint32_t g_forcedKey{kNoForcedKey};
  */
 [[nodiscard]] bool caller_is_game(const void* caller) noexcept {
     return diagnostics::contains(g_gameRange, reinterpret_cast<std::uintptr_t>(caller));
+}
+
+/** @return True while the game must read every key released: the interface or the spectator camera. */
+[[nodiscard]] bool keys_withheld() noexcept {
+    return g_interfaceOpen.load(std::memory_order_relaxed) || freecam::enabled();
 }
 
 /**
@@ -53,7 +59,7 @@ std::array<void*, kHandleCount> g_targets{};
  */
 __declspec(noinline) SHORT WINAPI get_key_state(int virtualKey) noexcept {
     if (caller_is_game(_ReturnAddress())) {
-        if (g_interfaceOpen.load(std::memory_order_relaxed)) {
+        if (keys_withheld()) {
             return kKeyReleased;
         }
         if (is_forced(virtualKey)) {
@@ -73,7 +79,7 @@ __declspec(noinline) SHORT WINAPI get_key_state(int virtualKey) noexcept {
  * @return Released while the interface is open and the caller is the game, else the real state.
  */
 __declspec(noinline) SHORT WINAPI get_async_key_state(int virtualKey) noexcept {
-    if (g_interfaceOpen.load(std::memory_order_relaxed) && caller_is_game(_ReturnAddress())) {
+    if (keys_withheld() && caller_is_game(_ReturnAddress())) {
         return kKeyReleased;
     }
     const GetAsyncKeyState next = original<GetAsyncKeyState>(HookSlot::getAsyncKeyState);

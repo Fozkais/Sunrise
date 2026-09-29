@@ -81,6 +81,8 @@ push_incident_revision_member(lua_State* state, const host::Event& event, std::s
         return "slot.play_dialogue_cue";
     case ActionKind::holdSpawn:
         return "mission.hold_spawn";
+    case ActionKind::setSection:
+        return "mission.set_section";
     case ActionKind::selectMissionState:
         return "mission.select_state";
     }

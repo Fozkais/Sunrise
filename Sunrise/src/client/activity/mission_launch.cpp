@@ -11,6 +11,7 @@
 
 #include "../../core/logging/log.h"
 #include "../../state/activity/forced/activity_forced_destination.h"
+#include "../../state/activity/mission/continuation.h"
 #include "../../state/activity/runtime.h"
 #include "../../state/build_data/activities/activity_catalog.h"
 #include "../../state/build_data/runtime.h"
@@ -96,6 +97,15 @@ constexpr std::string_view kCommitSelectionText =
 constexpr auto kCommitSelection =
     signature<signature_length(kCommitSelectionText)>(kCommitSelectionText);
 
+// Matches the boot-flow "leave" request: it validates the transition (step, reason) and latches it.
+// The frame sizes and the cookie xor separate it from the validator it calls.
+constexpr std::string_view kLeaveText =
+    "48 89 5C 24 18 55 56 57 48 8D AC 24 D0 FC FF FF 48 81 EC 30 04 00 00 48 8B 05 ? ? ? ? "
+    "48 33 C4 48 89 85 20 03 00 00 8B F2 8B F9 E8 ? ? ? ? 4C 8D 85 E0 00 00 00 C6 85 E0 00 00 00 "
+    "00 8B D6 8B CF 48 8B D8 E8 ? ? ? ? 84 C0 0F 85";
+/** Compiled pattern bytes of the signature text above. */
+constexpr auto kLeave = signature<signature_length(kLeaveText)>(kLeaveText);
+
 // --- Native layouts, as far as the launch path reads them ---
 
 /** Local member slot of one group session. */
@@ -136,6 +146,19 @@ struct SessionManager {
 
 static_assert(offsetof(SessionManager, primary) == kManagerPrimaryOffset);
 static_assert(offsetof(SessionManager, sessions) == kManagerSessionsOffset);
+
+/** The session's replicated activity-transition property. */
+constexpr std::size_t kTransitionOffset = 0x182C0;
+/** Property flags; bit 0 says the request value is filled. */
+constexpr std::size_t kTransitionFlagsOffset = kTransitionOffset + 0x140;
+/** Request value: kind byte +0, from +2, target activity index +4, fireteam nonce +0x18. */
+constexpr std::size_t kTransitionRequestIndexOffset = kTransitionOffset + 0x148 + 4;
+constexpr std::size_t kTransitionRequestNonceOffset = kTransitionOffset + 0x148 + 0x18;
+/** Effective descriptor, filled once the request is classified; its kind reads 0xFF until then. */
+constexpr std::size_t kTransitionEffectiveKindOffset = kTransitionOffset + 0x378;
+constexpr std::uint8_t kTransitionKindUnfilled = 0xFF;
+/** Where the selection carries the fireteam nonce the launch machine copies into the request. */
+constexpr std::size_t kSelectionNonceOffset = 0x10;
 
 /** Launch state byte of one member record. */
 constexpr std::size_t kMemberLaunchStateOffset = 0xA33;
@@ -195,6 +218,15 @@ constexpr std::int32_t kInWorldStep = 38;
 constexpr std::int32_t kWatchVideoStep = 39;
 /** An arrival not confirmed inside this window reports as timed out. */
 constexpr std::uint64_t kArrivalTimeoutMs = 120'000;
+/** Boot-flow step `cleanup`, where a world exit goes before the next activity's session. */
+constexpr std::int32_t kCleanupStep = 28;
+/**
+ * The reason a deliberate in-world exit reports: cleanup treats it as an activity transition, so
+ * it relaunches the latched selection with no error dialog and no orbit round trip.
+ */
+constexpr std::int32_t kActivityExitReason = 309;
+/** The exit is not raised until the request shows the new activity; past this it is dropped. */
+constexpr std::uint64_t kContinuationDescriptorTimeoutMs = 10'000;
 
 using GetManager = SessionManager*(__fastcall*)() noexcept;
 using SessionTest = bool(__fastcall*)(const GroupSession*) noexcept;
@@ -207,6 +239,7 @@ using ActivityName = const char*(__fastcall*)(std::int16_t) noexcept;
 using ClearSelections = void(__fastcall*)() noexcept;
 using SetSelection = void(__fastcall*)(std::uint8_t, const Selection*) noexcept;
 using CommitSelection = void(__fastcall*)(std::int32_t) noexcept;
+using LeaveWorld = std::uint64_t(__fastcall*)(std::int32_t, std::int32_t) noexcept;
 
 /** Unowned entry points of the Director's selection path. */
 struct Natives {
@@ -220,6 +253,7 @@ struct Natives {
     ClearSelections clear{};
     SetSelection select{};
     CommitSelection commit{};
+    LeaveWorld leave{};
 };
 
 Natives g_natives{};
@@ -232,6 +266,37 @@ std::uint64_t g_requestedAt{};
 state::activity::SessionBinding g_previousSession{};
 bool g_leftOrbit{};
 ManualScratch g_manualScratch{}; // Game-frame owner only, outside the UI arena and native stack.
+
+/** Where a continuation stands. Game thread only, apart from the suppression flag. */
+enum class ContinuationPhase : std::uint8_t {
+    idle,
+    /** Selection committed; waiting for the request to carry the new activity. */
+    queued,
+    /** Exit raised; waiting for the new activity's world. */
+    departing,
+};
+
+struct Continuation final {
+    ContinuationPhase phase{ContinuationPhase::idle};
+    std::int16_t index{-1};
+    std::uintptr_t session{};
+    std::uint64_t startedAt{};
+    state::activity::SessionBinding source{};
+    bool leftWorld{};
+};
+
+Continuation g_continuation{};
+/** Read by the loading-cinematics detour, which runs on the game thread. */
+std::atomic_bool g_suppressLoading{false};
+
+template <typename T> [[nodiscard]] bool read_memory(std::uintptr_t address, T& value) noexcept {
+    SIZE_T copied{};
+    return address != 0
+           && ReadProcessMemory(
+                  GetCurrentProcess(), reinterpret_cast<const void*>(address), &value, sizeof(T), &copied)
+                  != FALSE
+           && copied == sizeof(T);
+}
 
 /** @return The newest joined session binding, or an empty one when none is joined. */
 state::activity::SessionBinding newest_joined_session() noexcept {
@@ -330,7 +395,8 @@ arrived(const Snapshot& state,
  */
 [[nodiscard]] Status
 submit(const Snapshot& state,
-       std::span<const state::build_data::activities::Definition> rows) noexcept {
+       std::span<const state::build_data::activities::Definition> rows,
+       std::uint64_t fireteamNonce = 0) noexcept {
     const Natives natives = g_natives;
     SessionManager* const manager = natives.manager();
     if (manager == nullptr || manager->primary < 0
@@ -361,6 +427,16 @@ submit(const Snapshot& state,
         || selection.kind != kSelectionKindActivity || selection.source != index
         || selection.destination != index || !natives.valid(&selection)) {
         return Status::descriptorRejected;
+    }
+    if (fireteamNonce != 0) {
+        // A launch that leaves a live world must carry the fireteam nonce the world latched;
+        // without it the in-world blocker takes the client to orbit instead.
+        std::memcpy(reinterpret_cast<std::byte*>(&selection) + kSelectionNonceOffset,
+                    &fireteamNonce,
+                    sizeof(fireteamNonce));
+        if (!natives.valid(&selection)) {
+            return Status::descriptorRejected;
+        }
     }
     g_previousSession = newest_joined_session();
     g_leftOrbit = false;
@@ -393,6 +469,8 @@ bool install() noexcept {
     std::byte* const select = scan_main_image_unique(kSetSelection, "mission_launch_set_selection");
     std::byte* const commit =
         scan_main_image_unique(kCommitSelection, "mission_launch_commit_selection");
+    // Only the continuation needs it; a miss keeps the orbit launch working.
+    std::byte* const leave = scan_main_image_unique(kLeave, "mission_launch_leave_world");
     if (record == nullptr || sessionReady == nullptr || memberReady == nullptr
         || construct == nullptr || valid == nullptr || name == nullptr || clearSite == nullptr
         || select == nullptr || commit == nullptr || record[kManagerCallOffset] != kNearCallOpcode
@@ -415,16 +493,20 @@ bool install() noexcept {
         resolve_relative(clearSite + 1, clearSite + kNearCallBytes));
     found.select = reinterpret_cast<SetSelection>(select);
     found.commit = reinterpret_cast<CommitSelection>(commit);
+    found.leave = reinterpret_cast<LeaveWorld>(leave);
     g_natives = found;
     g_resolved.store(true, std::memory_order_release);
     core::log::write(core::log::Channel::client,
                      core::log::Level::info,
-                     "ev=mission_launch stage=install result=ok");
+                     leave == nullptr ? "ev=mission_launch stage=install result=ok leave=missing"
+                                      : "ev=mission_launch stage=install result=ok");
     return true;
 }
 
 void uninstall() noexcept {
     g_resolved.store(false, std::memory_order_release);
+    g_suppressLoading.store(false, std::memory_order_relaxed);
+    g_continuation = {};
     g_natives = {};
 }
 
@@ -461,10 +543,157 @@ bool request_manual(std::uint16_t index, const forced::ForcedDestination& destin
     return true;
 }
 
+namespace {
+
+/** Logs one continuation outcome. @param result Short key. @param index Activity concerned. */
+void report_continuation(const char* result, std::int32_t index) noexcept {
+    std::array<char, 128> line{};
+    const int size = std::snprintf(line.data(),
+                                   line.size(),
+                                   "ev=mission_launch stage=continuation result=%s activity=%d",
+                                   result,
+                                   index);
+    if (size > 0 && static_cast<std::size_t>(size) < line.size()) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::info,
+                         {line.data(), static_cast<std::size_t>(size)});
+    }
+}
+
+/** Ends the continuation, whatever came of it, and lets the loading movies play again. */
+void end_continuation(const char* result) noexcept {
+    report_continuation(result, g_continuation.index);
+    g_suppressLoading.store(false, std::memory_order_relaxed);
+    g_continuation = {};
+}
+
+/**
+ * Takes a completed mission's request to continue into another activity: commits that activity's
+ * selection from inside the world, carrying the fireteam nonce.
+ */
+void begin_continuation(std::int32_t step) noexcept {
+    const auto request = state::activity::mission::continuation::pending();
+    if (request.activity < 0 || step != kInWorldStep) {
+        return;
+    }
+    const auto rows = state::build_data::activities::entries();
+    const auto session = newest_joined_session();
+    if (session.sessionId != request.sessionId || session.createdRevision != request.createdRevision) {
+        state::activity::mission::continuation::clear();
+        report_continuation("stale", request.activity);
+        return;
+    }
+    state::build_data::scenarios::Definition layout{};
+    if (g_natives.leave == nullptr || request.activity >= static_cast<std::int16_t>(rows.size())
+        || rows[static_cast<std::size_t>(request.activity)].name().empty()
+        || !state::build_data::find_scenario_layout(rows[static_cast<std::size_t>(request.activity)].name(),
+                                                    layout)) {
+        state::activity::mission::continuation::clear();
+        report_continuation(g_natives.leave == nullptr ? "leave_missing" : "entry_unavailable",
+                            request.activity);
+        return;
+    }
+    const SessionManager* const manager = g_natives.manager();
+    if (manager == nullptr || manager->primary < 0
+        || manager->primary >= static_cast<std::int32_t>(kSessionSlots)) {
+        return;
+    }
+    const auto address = reinterpret_cast<std::uintptr_t>(
+        &manager->sessions[static_cast<std::size_t>(manager->primary)]);
+    std::uint8_t flags{};
+    std::uint64_t nonce{};
+    if (!read_memory(address + kTransitionFlagsOffset, flags) || (flags & 1U) == 0
+        || !read_memory(address + kTransitionRequestNonceOffset, nonce) || nonce == 0
+        || nonce == ~std::uint64_t{}) {
+        return; // The world has not latched its fireteam nonce yet.
+    }
+    Snapshot draft{Status::requested, static_cast<std::uint16_t>(request.activity), true};
+    const Status status = submit(draft, rows, nonce);
+    if (status == Status::notReady) {
+        return;
+    }
+    state::activity::mission::continuation::clear();
+    if (status != Status::queued) {
+        report_continuation("rejected", request.activity);
+        return;
+    }
+    g_continuation = {ContinuationPhase::queued,
+                      request.activity,
+                      address,
+                      GetTickCount64(),
+                      session,
+                      false};
+    report_continuation("queued", request.activity);
+}
+
+/**
+ * Advances a continuation: once the session's request names the new activity and its transition
+ * is classified, raises the world exit that relaunches the committed selection, then waits for
+ * the new world.
+ */
+void advance_continuation(std::int32_t step) noexcept {
+    Continuation& c = g_continuation;
+    const std::uint64_t now = GetTickCount64();
+    if (c.phase == ContinuationPhase::queued) {
+        std::int16_t requested{};
+        std::uint8_t kind{kTransitionKindUnfilled};
+        const bool described = step == kInWorldStep
+                               && read_memory(c.session + kTransitionRequestIndexOffset, requested)
+                               && requested == c.index
+                               && read_memory(c.session + kTransitionEffectiveKindOffset, kind)
+                               && kind != kTransitionKindUnfilled;
+        if (described || step != kInWorldStep) {
+            // Off in_world already means the native flow took over; the exit stays ours to raise
+            // only while the world is still up.
+            if (described) {
+                g_natives.leave(kCleanupStep, kActivityExitReason);
+            }
+            g_suppressLoading.store(true, std::memory_order_relaxed);
+            c.phase = ContinuationPhase::departing;
+            c.startedAt = now;
+            c.leftWorld = step != kInWorldStep;
+            report_continuation(described ? "exit" : "native_exit", c.index);
+        } else if (now - c.startedAt > kContinuationDescriptorTimeoutMs) {
+            end_continuation("descriptor_timeout");
+        }
+        return;
+    }
+    if (step != kInWorldStep) {
+        c.leftWorld = true;
+        return;
+    }
+    const auto arrival = newest_joined_session();
+    if (c.leftWorld && !state::activity::same_binding(arrival, c.source)
+        && arrival.destination.activityIndex == c.index) {
+        end_continuation("arrived");
+    } else if (now - c.startedAt > kArrivalTimeoutMs) {
+        end_continuation("timeout");
+    }
+}
+
+/** Runs the continuation for one frame while no orbit launch is pending. */
+void poll_continuation(std::int32_t step) noexcept {
+    if (!g_resolved.load(std::memory_order_acquire)) {
+        return;
+    }
+    if (g_continuation.phase == ContinuationPhase::idle) {
+        begin_continuation(step);
+    } else {
+        advance_continuation(step);
+    }
+}
+
+} // namespace
+
+bool suppress_loading() noexcept {
+    return g_suppressLoading.load(std::memory_order_relaxed);
+}
+
 /** Validates the pending request against the catalog and the client, then submits it. */
 void poll(std::int32_t step) noexcept {
     const auto state = snapshot();
     if (!state.busy) {
+        poll_continuation(step);
         return;
     }
     if (!g_resolved.load(std::memory_order_acquire)) {
