@@ -27,6 +27,7 @@
 #include "../../sobjects/sobject_catalog.h"
 #include "../../socket_entry_lists/socket_entry_list_catalog.h"
 #include "../../spawn_sets/spawn_set_catalog.h"
+#include "../../unlock_flags/unlock_flag_catalog.h"
 #include "../../vendors/vendor_catalog.h"
 #include "../domain_markers.h"
 
@@ -92,6 +93,7 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && season_pass::snapshot(scratch.seasonPassRewards, counts.seasonPassRewards)
            && season_pass::snapshot_packages(scratch.seasonPassPackages, counts.seasonPassPackages)
            && bounties::snapshot(scratch.bounties, counts.bounties)
+           && unlock_flags::snapshot(scratch.unlockFlags, counts.unlockFlags)
            && records::snapshot(scratch.records, counts.records)
            && records::snapshot_objectives(scratch.recordObjectives, counts.recordObjectives)
            && records::snapshot_intervals(scratch.recordIntervals, counts.recordIntervals)
@@ -125,9 +127,10 @@ to_record(const constants::InvestmentConstants& value) noexcept {
            && material_requirement_sets_ready() && inventory_bucket_descriptors_ready()
            && socket_entry_lists_ready() && ability_buckets_ready()
            && progression_definitions_ready() && season_pass_ready() && repeatable_bounties_ready()
-           && record_definitions_ready() && node_definitions_ready() && sobject_definitions_ready()
-           && scenario_layouts_ready() && spawn_sets_ready() && hash_names_ready()
-           && vendor_catalog_ready() && gameplay::entity_position_profiles::available()
+           && unlock_flags_ready() && record_definitions_ready() && node_definitions_ready()
+           && sobject_definitions_ready() && scenario_layouts_ready() && spawn_sets_ready()
+           && hash_names_ready() && vendor_catalog_ready()
+           && gameplay::entity_position_profiles::available()
            && gameplay::entity_object_types::available() && constants::find(published);
 }
 
@@ -227,6 +230,9 @@ cache::records::MutableDomains scratch_domains(Context& state) noexcept {
             state.seasonPassPackageScratch);
     const auto bountyRows =
         ensure_scratch<bounties::Definition, bounties::kDefinitionCapacity>(state.bountyScratch);
+    const auto unlockFlagRows =
+        ensure_scratch<unlock_flags::Definition, unlock_flags::kDefinitionCapacity>(
+            state.unlockFlagScratch);
     const auto positionProfiles = ensure_scratch<gameplay::entity_position_profiles::Row,
                                                  gameplay::entity_position_profiles::kMaximumRows>(
         state.positionProfileScratch);
@@ -270,6 +276,7 @@ cache::records::MutableDomains scratch_domains(Context& state) noexcept {
         seasonPassRewards,
         seasonPassPackages,
         bountyRows,
+        unlockFlagRows,
     };
 }
 
@@ -301,6 +308,7 @@ void release_scratch_locked(Context& state) noexcept {
     release_bank(state.seasonPassRewardScratch);
     release_bank(state.seasonPassPackageScratch);
     release_bank(state.bountyScratch);
+    release_bank(state.unlockFlagScratch);
     release_bank(state.recordScratch);
     release_bank(state.recordObjectiveScratch);
     release_bank(state.recordIntervalScratch);
@@ -405,6 +413,8 @@ cache::records::Domains occupied_domains(Context& state,
         std::span<const season_pass::Package>{state.seasonPassPackageScratch.data(),
                                               counts.seasonPassPackages},
         std::span<const bounties::Definition>{state.bountyScratch.data(), counts.bounties},
+        std::span<const unlock_flags::Definition>{state.unlockFlagScratch.data(),
+                                                  counts.unlockFlags},
     };
 }
 

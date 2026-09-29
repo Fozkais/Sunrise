@@ -126,6 +126,7 @@ void clear(records::MutableDomains output) noexcept {
     std::fill(
         output.seasonPassPackages.begin(), output.seasonPassPackages.end(), season_pass::Package{});
     std::fill(output.bounties.begin(), output.bounties.end(), bounties::Definition{});
+    std::fill(output.unlockFlags.begin(), output.unlockFlags.end(), unlock_flags::Definition{});
 }
 
 /** Computes the exact file size for every record array. */
@@ -168,7 +169,8 @@ bool expected_size(const records::DomainCounts& counts, std::uint64_t& size) noe
            && add_records(counts.progressionSteps, sizeof(records::ProgressionStepRecord), size)
            && add_records(counts.seasonPassRewards, sizeof(records::SeasonPassRewardRecord), size)
            && add_records(counts.seasonPassPackages, sizeof(records::SeasonPassPackageRecord), size)
-           && add_records(counts.bounties, sizeof(records::BountyRecord), size);
+           && add_records(counts.bounties, sizeof(records::BountyRecord), size)
+           && add_records(counts.unlockFlags, sizeof(records::UnlockFlagRecord), size);
 }
 
 /** Reads every payload array and checks the decoded domains as one transaction. */
@@ -288,6 +290,9 @@ bool read_payload(HANDLE file,
     valid = valid
             && read_domain<records::BountyRecord>(
                 file, output.bounties.first(counts.bounties), checksum);
+    valid = valid
+            && read_domain<records::UnlockFlagRecord>(
+                file, output.unlockFlags.first(counts.unlockFlags), checksum);
     if (!valid) {
         return false;
     }
@@ -332,6 +337,7 @@ bool read_payload(HANDLE file,
             output.seasonPassRewards.first(counts.seasonPassRewards),
             output.seasonPassPackages.first(counts.seasonPassPackages),
             output.bounties.first(counts.bounties),
+            output.unlockFlags.first(counts.unlockFlags),
         });
 }
 

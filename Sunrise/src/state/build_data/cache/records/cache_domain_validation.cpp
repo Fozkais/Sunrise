@@ -18,6 +18,7 @@
 #include "../../sobjects/sobject_catalog.h"
 #include "../../socket_entry_lists/socket_entry_list_catalog.h"
 #include "../../spawn_sets/spawn_set_catalog.h"
+#include "../../unlock_flags/unlock_flag_catalog.h"
 #include "../../vendors/vendor_catalog.h"
 #include "validation.h"
 
@@ -170,7 +171,8 @@ template <typename Value, typename Less>
            && counts.progressionSteps <= domains.progressionSteps.size()
            && counts.seasonPassRewards <= domains.seasonPassRewards.size()
            && counts.seasonPassPackages <= domains.seasonPassPackages.size()
-           && counts.bounties <= domains.bounties.size();
+           && counts.bounties <= domains.bounties.size()
+           && counts.unlockFlags <= domains.unlockFlags.size();
 }
 
 } // namespace
@@ -251,7 +253,7 @@ bool valid_domains(const BuildIdentity& build, Domains domains) noexcept {
         // An empty catalog is complete: a build with no installed pass declares no reward.
         || (!domains.seasonPassRewards.empty()
             && !season_pass::valid(domains.seasonPassRewards, domains.seasonPassPackages))
-        || !bounties::valid(domains.bounties)
+        || !bounties::valid(domains.bounties) || !unlock_flags::valid(domains.unlockFlags)
         || !build_data::records::valid(domains.records,
                                        domains.recordObjectives,
                                        domains.recordIntervals,

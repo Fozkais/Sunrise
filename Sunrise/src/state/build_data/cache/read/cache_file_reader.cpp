@@ -54,7 +54,8 @@ namespace {
            && counts.progressionSteps <= output.progressionSteps.size()
            && counts.seasonPassRewards <= output.seasonPassRewards.size()
            && counts.seasonPassPackages <= output.seasonPassPackages.size()
-           && counts.bounties <= output.bounties.size();
+           && counts.bounties <= output.bounties.size()
+           && counts.unlockFlags <= output.unlockFlags.size();
 }
 
 /** @return The header's row counts, as platform sizes. */
@@ -96,6 +97,7 @@ namespace {
         header.seasonPassRewardCount,
         header.seasonPassPackageCount,
         header.bountyCount,
+        header.unlockFlagCount,
     };
 }
 

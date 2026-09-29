@@ -31,6 +31,7 @@
 #include "sobjects/sobject_catalog.h"
 #include "socket_entry_lists/socket_entry_list_catalog.h"
 #include "spawn_sets/spawn_set_catalog.h"
+#include "unlock_flags/unlock_flag_catalog.h"
 #include "vendors/vendor_catalog.h"
 
 namespace sunrise::state::build_data {
@@ -127,7 +128,7 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
         // An empty catalog is complete: a build with no installed pass declares no reward.
         || (!domains.seasonPassRewards.empty()
             && !season_pass::replace(domains.seasonPassRewards, domains.seasonPassPackages))
-        || !bounties::replace(domains.bounties)
+        || !bounties::replace(domains.bounties) || !unlock_flags::replace(domains.unlockFlags)
         || !records::replace(domains.records,
                              domains.recordObjectives,
                              domains.recordIntervals,

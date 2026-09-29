@@ -42,6 +42,18 @@ void report_ability_count(std::size_t count) noexcept {
     }
 }
 
+/** @param count Unlock flag rows the pass built, one per slot of the installed table. */
+void report_unlock_flag_count(std::size_t count) noexcept {
+    std::array<char, 96> line{};
+    const int written = std::snprintf(
+        line.data(), line.size(), "ev=pkg stage=unlock_flags result=ok rows=%zu", count);
+    if (written > 0) {
+        core::log::write(core::log::Channel::client,
+                         core::log::Level::info,
+                         {line.data(), static_cast<std::size_t>(written)});
+    }
+}
+
 /** Reports the precise ability boundary without flooding the periodic extraction retry. */
 void report_ability_failure(const char* stage,
                             std::size_t character,

@@ -29,6 +29,7 @@
 #include "socket_entry_buckets/definition.h"
 #include "socket_entry_lists/definition.h"
 #include "spawn_sets/definition.h"
+#include "unlock_flags/definition.h"
 #include "vendors/definition.h"
 
 namespace sunrise::state::build_data::items::catalysts {
@@ -418,6 +419,17 @@ publish_progression_definitions(std::span<const progressions::Definition> defini
 
 /** @return Season pass reward rows in State. */
 [[nodiscard]] std::size_t season_pass_reward_count() noexcept;
+
+/** @return True when the installed unlock flag table is in State. */
+[[nodiscard]] bool unlock_flags_ready() noexcept;
+
+/**
+ * Publishes every installed unlock flag.
+ * @param definitions Complete rows in slot order.
+ * @return True when the rows pass the checks and any needed cache write succeeds.
+ */
+[[nodiscard]] bool
+publish_unlock_flags(std::span<const unlock_flags::Definition> definitions) noexcept;
 
 /** @return True when the repeatable bounty table is in State. */
 [[nodiscard]] bool repeatable_bounties_ready() noexcept;

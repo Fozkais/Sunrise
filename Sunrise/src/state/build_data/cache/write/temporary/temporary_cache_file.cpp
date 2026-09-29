@@ -142,6 +142,7 @@ enum class WriteStatus {
         static_cast<std::uint32_t>(domains.seasonPassRewards.size()),
         static_cast<std::uint32_t>(domains.seasonPassPackages.size()),
         static_cast<std::uint32_t>(domains.bounties.size()),
+        static_cast<std::uint32_t>(domains.unlockFlags.size()),
         domains.positionFingerprint,
         domains.constants,
         checksum,

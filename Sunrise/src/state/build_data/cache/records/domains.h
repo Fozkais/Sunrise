@@ -24,6 +24,7 @@
 #include "../../sobjects/sobject_catalog.h"
 #include "../../socket_entry_lists/definition.h"
 #include "../../spawn_sets/definition.h"
+#include "../../unlock_flags/definition.h"
 #include "../../vendors/definition.h"
 #include "format.h"
 
@@ -67,6 +68,7 @@ struct DomainCounts {
     std::size_t seasonPassRewards{};
     std::size_t seasonPassPackages{};
     std::size_t bounties{};
+    std::size_t unlockFlags{};
 };
 
 /** Fixed caller storage used while decoding the cache domains. */
@@ -110,6 +112,7 @@ struct MutableDomains {
     std::span<season_pass::Reward> seasonPassRewards;
     std::span<season_pass::Package> seasonPassPackages;
     std::span<bounties::Definition> bounties;
+    std::span<unlock_flags::Definition> unlockFlags;
 };
 
 /** Read-only complete views used for the checks and for cache encoding. */
@@ -152,6 +155,7 @@ struct Domains {
     std::span<const season_pass::Reward> seasonPassRewards;
     std::span<const season_pass::Package> seasonPassPackages;
     std::span<const bounties::Definition> bounties;
+    std::span<const unlock_flags::Definition> unlockFlags;
 };
 
 } // namespace sunrise::state::build_data::cache::records

@@ -738,6 +738,8 @@
     <ClCompile Include="src\state\build_data\season_pass\season_pass_build_data_runtime.cpp" />
     <ClCompile Include="src\state\build_data\bounties\bounty_catalog.cpp" />
     <ClCompile Include="src\state\build_data\bounties\bounty_build_data_runtime.cpp" />
+    <ClCompile Include="src\state\build_data\unlock_flags\unlock_flag_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\unlock_flags\unlock_flag_build_data_runtime.cpp" />
     <ClCompile Include="src\state\build_data\scriptables\scriptable_catalog.cpp" />
     <ClCompile Include="src\state\build_data\runtime\domain_markers.cpp" />
     <ClCompile Include="src\state\build_data\inventory\buckets\inventory_bucket_catalog.cpp" />
@@ -1152,6 +1154,7 @@
     <ClCompile Include="src\client\content\items\packages\package_progression_build.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_season_pass_build.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_bounty_build.cpp" />
+    <ClCompile Include="src\client\content\items\packages\package_unlock_flag_build.cpp" />
     <ClCompile Include="src\middleware\content\packages\reader\package_file_locator.cpp" />
     <ClCompile Include="src\middleware\crypto\aes_gcm_decrypt.cpp" />
     <ClCompile Include="src\middleware\content\manifest\content_manifest_encoder.cpp" />
@@ -2127,6 +2130,8 @@
     <ClInclude Include="src\state\build_data\bounties\definition.h" />
     <ClInclude Include="src\state\build_data\bounties\bounty_catalog.h" />
     <ClInclude Include="src\server\bap\encrypted\activity_host_manager\activity_establish_response.h" />
+    <ClInclude Include="src\state\build_data\unlock_flags\definition.h" />
+    <ClInclude Include="src\state\build_data\unlock_flags\unlock_flag_catalog.h" />
     <ClInclude Include="src\state\build_data\vendors\repeatable_triggers.h" />
     <ClInclude Include="src\state\build_data\progressions\definition.h" />
     <ClInclude Include="src\state\entitlements\definition.h" />

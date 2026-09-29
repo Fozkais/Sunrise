@@ -28,6 +28,7 @@
 #include "../../sobjects/sobject_catalog.h"
 #include "../../socket_entry_lists/definition.h"
 #include "../../spawn_sets/definition.h"
+#include "../../unlock_flags/definition.h"
 #include "../../vendors/definition.h"
 
 namespace sunrise::state::build_data::runtime::persistence {
@@ -81,6 +82,7 @@ struct Context {
     std::vector<season_pass::Reward> seasonPassRewardScratch{};
     std::vector<season_pass::Package> seasonPassPackageScratch{};
     std::vector<bounties::Definition> bountyScratch{};
+    std::vector<unlock_flags::Definition> unlockFlagScratch{};
     std::vector<records::Definition> recordScratch{};
     std::vector<records::Objective> recordObjectiveScratch{};
     std::vector<records::Interval> recordIntervalScratch{};

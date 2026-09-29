@@ -36,6 +36,7 @@ namespace {
            && state::build_data::progression_definitions_ready()
            && state::build_data::season_pass_ready()
            && state::build_data::repeatable_bounties_ready()
+           && state::build_data::unlock_flags_ready()
            && state::build_data::record_definitions_ready()
            && state::build_data::node_definitions_ready()
            && state::build_data::sobject_definitions_ready()
@@ -189,6 +190,12 @@ bool build() noexcept {
                 (void)state::build_data::publish_season_pass(
                     std::span(storage.seasonPassRewards).first(storage.seasonPassRewardCount),
                     std::span(storage.seasonPassPackages).first(storage.seasonPassPackageCount));
+            }
+            if (!state::build_data::unlock_flags_ready()
+                && build_unlock_flags(source, storage, std::span<const std::byte>{storage.root})) {
+                report_unlock_flag_count(storage.unlockFlagCount);
+                (void)state::build_data::publish_unlock_flags(
+                    std::span(storage.unlockFlagRows).first(storage.unlockFlagCount));
             }
             // Records are read before nodes: a node's lore-book flag and its parent bar come
             // from the records it owns, so the record rows must already be in pass storage.

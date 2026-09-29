@@ -155,6 +155,18 @@ bool decode(const BountyRecord& record, bounties::Definition& value) noexcept {
     return true;
 }
 
+/** Encodes one unlock flag row. */
+bool encode(const unlock_flags::Definition& value, UnlockFlagRecord& record) noexcept {
+    record = {value.hash, value.bank, value.row};
+    return true;
+}
+
+/** Decodes one unlock flag row. */
+bool decode(const UnlockFlagRecord& record, unlock_flags::Definition& value) noexcept {
+    value = {record.hash, record.bank, record.row};
+    return true;
+}
+
 /** Encodes one record objective row with its padding zeroed. */
 bool encode(const build_data::records::Objective& value, RecordObjectiveRecord& record) noexcept {
     record = {value.completionValue,

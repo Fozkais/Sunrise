@@ -235,6 +235,11 @@ inline constexpr std::size_t kUnlockFlagSlotTableSlot = 112;
 /** One flag slot row, and the bank row it feeds inside the object its kind names. */
 inline constexpr std::size_t kUnlockSlotRowStride = 8;
 inline constexpr std::size_t kUnlockSlotBankIndexOffset = 6;
+/** Element class of the unlock flag slot table. */
+inline constexpr std::uint32_t kUnlockSlotRowClass = 0x80807D4FU;
+/** The flag's authored hash, then the code of the bank that stores it. */
+inline constexpr std::size_t kUnlockSlotHashOffset = 0;
+inline constexpr std::size_t kUnlockSlotBankOffset = 4;
 
 /** Installed tag of the per-item strings index table. Its rows sit in item index order. */
 inline constexpr std::uint32_t kItemStringsIndexTag = 0x81613CF1U;

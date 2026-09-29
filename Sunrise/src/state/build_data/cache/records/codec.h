@@ -103,6 +103,9 @@ namespace sunrise::state::build_data::cache::records {
 [[nodiscard]] bool encode(const bounties::Definition& value, BountyRecord& record) noexcept;
 [[nodiscard]] bool decode(const BountyRecord& record, bounties::Definition& value) noexcept;
 
+[[nodiscard]] bool encode(const unlock_flags::Definition& value, UnlockFlagRecord& record) noexcept;
+[[nodiscard]] bool decode(const UnlockFlagRecord& record, unlock_flags::Definition& value) noexcept;
+
 [[nodiscard]] bool encode(const build_data::records::Objective& value,
                           RecordObjectiveRecord& record) noexcept;
 [[nodiscard]] bool decode(const RecordObjectiveRecord& record,

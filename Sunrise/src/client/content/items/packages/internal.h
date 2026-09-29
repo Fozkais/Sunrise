@@ -24,6 +24,7 @@
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/build_data/season_pass/definition.h"
 #include "../../../../state/build_data/sobjects/sobject_catalog.h"
+#include "../../../../state/build_data/unlock_flags/definition.h"
 
 namespace sunrise::client::content::items::packages {
 
@@ -168,6 +169,11 @@ struct Storage {
                state::build_data::bounties::kDefinitionCapacity>
         bountyRows{};
     std::size_t bountyCount{};
+    /** Installed unlock flags in slot order. */
+    std::array<state::build_data::unlock_flags::Definition,
+               state::build_data::unlock_flags::kDefinitionCapacity>
+        unlockFlagRows{};
+    std::size_t unlockFlagCount{};
     std::array<state::build_data::collectibles::Definition,
                state::build_data::collectibles::kDefinitionCapacity>
         collectibleRows{};
@@ -384,6 +390,11 @@ read_investment_constants(const reader::Source& source,
                                      Storage& storage,
                                      std::span<const std::byte> root) noexcept;
 
+/** Reads the installed unlock flag table, one row per slot. */
+[[nodiscard]] bool build_unlock_flags(const reader::Source& source,
+                                      Storage& storage,
+                                      std::span<const std::byte> root) noexcept;
+
 /** Reads the item-type of every repeatable bounty, which is what groups a vendor pool. */
 [[nodiscard]] bool
 build_bounties(const reader::Source& source, Storage& storage, std::size_t itemCount) noexcept;
@@ -413,6 +424,9 @@ void report_detail_failure(std::size_t slot, std::uint16_t definitionIndex) noex
 
 /** @param count Ability bucket rows the pass built, one per subclass and ability selection. */
 void report_ability_count(std::size_t count) noexcept;
+
+/** Reports how many unlock flag rows the pass built. */
+void report_unlock_flag_count(std::size_t count) noexcept;
 
 /** Reports a bounded number of exact subclass/ability extraction failures per process. */
 void report_ability_failure(const char* stage,
