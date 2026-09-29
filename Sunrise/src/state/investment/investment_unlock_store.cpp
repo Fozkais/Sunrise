@@ -4,6 +4,9 @@
 namespace sunrise::state::investment::store {
 namespace {
 
+/** Rows of the account-wide banks belong to owner zero. */
+constexpr std::uint64_t kAccountOwner = 0;
+
 /** Before character selection, encoders use the first character's banner. */
 int selected_slot() noexcept {
     for (std::size_t slot = 0; slot < g_session.selected.size(); ++slot) {
@@ -12,6 +15,17 @@ int selected_slot() noexcept {
         }
     }
     return 0;
+}
+
+/**
+ * Character banks belong to the character's SOID, not to its slot: deleting a character shifts
+ * the survivors up a slot, and a slot key would hand them the deleted character's unlocks.
+ * @return False when no character occupies the slot.
+ */
+bool character_owner(int slot, std::uint64_t& owner) noexcept {
+    owner = 0;
+    Statement row("SELECT soid FROM characters WHERE slot=?");
+    return row.parameters(slot) && row.step() == SQLITE_ROW && row.column(0, owner) && owner != 0;
 }
 
 /** Rejects rows outside the destination bank before assigning their scalar value. */
@@ -74,7 +88,7 @@ bool assign(unlocks::Table& table,
 template <typename T, std::size_t N>
 bool write_bank(Statement& rows,
                 Statement& remove,
-                int owner,
+                std::uint64_t owner,
                 Bank bank,
                 const std::array<T, N>& before,
                 const std::array<T, N>& values) noexcept {
@@ -109,20 +123,23 @@ bool read_unlocks(unlocks::Table& output, int characterSlot) noexcept {
     if (selected >= static_cast<int>(kCharacterCapacity)) {
         return false;
     }
-    Statement rows("SELECT character_slot,bank,slot,lane,value FROM unlocks "
-                   "WHERE character_slot=-1 OR character_slot=?");
-    if (!rows.parameters(selected)) {
+    // A slot with no character still reads its account banks, and its character banks stay empty.
+    std::uint64_t characterSoid = 0;
+    (void)character_owner(selected, characterSoid);
+    Statement rows("SELECT owner,bank,slot,lane,value FROM unlocks WHERE owner=?1 OR owner=?2");
+    if (!rows.parameters(kAccountOwner, characterSoid)) {
         return false;
     }
     int result = rows.step();
     while (result == SQLITE_ROW) {
-        int owner = 0;
+        std::uint64_t owner = 0;
         Bank bank{};
         std::size_t slot = 0;
         std::size_t lane = 0;
         std::int32_t value = 0;
         if (!rows.columns(owner, bank, slot, lane, value)
-            || ((owner == -1 || owner == selected) && !assign(output, bank, slot, lane, value))) {
+            || ((owner == kAccountOwner || owner == characterSoid)
+                && !assign(output, bank, slot, lane, value))) {
             output = {};
             return false;
         }
@@ -138,48 +155,59 @@ bool write_unlocks(const unlocks::Table& value, int characterSlot) noexcept {
     if (selected >= static_cast<int>(kCharacterCapacity)) {
         return false;
     }
+    std::uint64_t owner = 0;
     unlocks::Table before;
-    if (!transaction.ready() || !read_unlocks(before, selected)) {
+    if (!transaction.ready() || !character_owner(selected, owner)
+        || !read_unlocks(before, selected)) {
         return false;
     }
     Statement rows("INSERT OR REPLACE INTO unlocks VALUES (?,?,?,?,?)");
-    Statement remove("DELETE FROM unlocks WHERE character_slot=? AND bank=? AND slot=? AND lane=?");
-    return write_bank(rows, remove, -1, Bank::accountFlags, before.accountFlags, value.accountFlags)
-           && write_bank(
-               rows, remove, -1, Bank::profileFlags, before.profileFlags, value.profileFlags)
+    Statement remove("DELETE FROM unlocks WHERE owner=? AND bank=? AND slot=? AND lane=?");
+    return write_bank(rows,
+                      remove,
+                      kAccountOwner,
+                      Bank::accountFlags,
+                      before.accountFlags,
+                      value.accountFlags)
            && write_bank(rows,
                          remove,
-                         selected,
+                         kAccountOwner,
+                         Bank::profileFlags,
+                         before.profileFlags,
+                         value.profileFlags)
+           && write_bank(rows,
+                         remove,
+                         owner,
                          Bank::characterFlags,
                          before.characterFlags,
                          value.characterFlags)
            && write_bank(rows,
                          remove,
-                         -1,
+                         kAccountOwner,
                          Bank::objectiveValues,
                          before.objectiveValues,
                          value.objectiveValues)
            && write_bank(rows,
                          remove,
-                         selected,
+                         owner,
                          Bank::characterObjectFlags,
                          before.characterObjectFlags,
                          value.characterObjectFlags)
            && write_bank(rows,
                          remove,
-                         selected,
+                         owner,
                          Bank::characterObjectValues,
                          before.characterObjectValues,
                          value.characterObjectValues)
            && write_bank(rows,
                          remove,
-                         -1,
+                         kAccountOwner,
                          Bank::accountProgressions,
                          before.accountProgressions,
                          value.accountProgressions)
            && write_bank(rows,
                          remove,
-                         selected,
+                         owner,
                          Bank::characterProgressions,
                          before.characterProgressions,
                          value.characterProgressions)
@@ -193,9 +221,13 @@ bool read_unlock(Bank bank, std::uint16_t slot, std::int32_t& value) noexcept {
     const bool character = bank == Bank::characterFlags || bank == Bank::characterObjectFlags
                            || bank == Bank::characterObjectValues
                            || bank == Bank::characterProgressions;
-    Statement row(
-        "SELECT value FROM unlocks WHERE character_slot=? AND bank=? AND slot=? AND lane=0");
-    if (!row.parameters(character ? selected_slot() : -1, bank, slot)) {
+    std::uint64_t owner = kAccountOwner;
+    if (character && !character_owner(selected_slot(), owner)) {
+        // No character owns any row yet, so every character flag reads clear.
+        return true;
+    }
+    Statement row("SELECT value FROM unlocks WHERE owner=? AND bank=? AND slot=? AND lane=0");
+    if (!row.parameters(owner, bank, slot)) {
         return false;
     }
     const int result = row.step();
@@ -208,10 +240,12 @@ bool write_unlock(Bank bank, std::uint16_t slot, std::int32_t value) noexcept {
     const bool character = bank == Bank::characterFlags || bank == Bank::characterObjectFlags
                            || bank == Bank::characterObjectValues
                            || bank == Bank::characterProgressions;
-    const int owner = character ? selected_slot() : -1;
+    std::uint64_t owner = kAccountOwner;
+    if (character && !character_owner(selected_slot(), owner)) {
+        return false;
+    }
     if (value == 0) {
-        Statement row(
-            "DELETE FROM unlocks WHERE character_slot=? AND bank=? AND slot=? AND lane=0");
+        Statement row("DELETE FROM unlocks WHERE owner=? AND bank=? AND slot=? AND lane=0");
         return row.write(owner, bank, slot);
     }
     Statement row("INSERT OR REPLACE INTO unlocks VALUES (?,?,?,0,?)");

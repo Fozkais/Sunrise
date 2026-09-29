@@ -252,9 +252,11 @@ bool encode_with_unlocks(const state::CharacterState& state,
     object.identity.race = static_cast<std::int8_t>(state.race);
     object.identity.gender = static_cast<std::int8_t>(state.gender);
     object.identity.characterClass = static_cast<std::int8_t>(state.characterClass);
+    static_assert(state::kCustomisationSize == character_record::layout::kHeaderBlockSize);
     std::memcpy(object.customisationHeader.data(),
-                character_record::layout::kHeaderBlockBytes.data(),
-                character_record::layout::kHeaderBlockBytes.size());
+                state.customised ? state.customisation.data()
+                                 : character_record::layout::kHeaderBlockBytes.data(),
+                character_record::layout::kHeaderBlockSize);
     object.lastOrbitedDestination = state.lastOrbitedDestination;
     // No previous activity is tracked, and a zero here would name the orbit activity.
     object.previousActivityIndex = kAbsentActivityIndex;

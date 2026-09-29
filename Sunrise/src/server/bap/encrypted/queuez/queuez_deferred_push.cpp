@@ -284,7 +284,7 @@ selected_character(const state::AccountState& account) noexcept {
             currentQueuez = appearanceAfter;
         }
     }
-    if (currentQueuez.family3Active) {
+    if (currentQueuez.family3Active && !session.rosterResyncSuppressed) {
         queuez::SessionState rosterAfter{};
         if (!push::append_account_resync_roster_notification(scratch,
                                                              currentQueuez,
@@ -312,6 +312,7 @@ selected_character(const state::AccountState& account) noexcept {
     session.sendNonce = nextSendNonce;
     session.queuez = currentQueuez;
     session.accountResyncArmed = false;
+    session.rosterResyncSuppressed = false;
     if (auxiliaryRefreshFailed) {
         // Family 4 already produced a complete frame. Appearance and roster are derived views,
         // so they retry in their own deferred lane rather than holding the account update.

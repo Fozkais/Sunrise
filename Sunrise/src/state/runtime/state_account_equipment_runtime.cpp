@@ -337,7 +337,8 @@ void report_item_state(std::string_view stage,
     if (left.soid != right.soid || left.selected != right.selected || left.race != right.race
         || left.gender != right.gender || left.characterClass != right.characterClass
         || left.level != right.level || left.previewAvailable != right.previewAvailable
-        || left.appearanceValue != right.appearanceValue
+        || left.appearanceValue != right.appearanceValue || left.customised != right.customised
+        || left.customisation != right.customisation
         || left.lastOrbitedDestination != right.lastOrbitedDestination
         || left.currentActivityIndex != right.currentActivityIndex
         || left.contentBypass != right.contentBypass

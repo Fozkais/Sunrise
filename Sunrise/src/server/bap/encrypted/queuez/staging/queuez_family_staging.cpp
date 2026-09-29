@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <limits>
 
+#include "../../../../../core/logging/log.h"
 #include "../queuez_state_validation.h"
 
 namespace sunrise::server::bap::encrypted::queuez {
@@ -119,10 +120,10 @@ bool stage_family0_subscription(const SessionState& before,
 }
 
 /** Stages one Family-3 subscription: a full body first, then response-only. */
-bool stage_family3_subscription(const SessionState& before,
-                                const middleware::queuez::Subscription& subscription,
-                                bool& publish,
-                                SessionState& after) noexcept {
+bool stage_family3_subscription_state(const SessionState& before,
+                                      const middleware::queuez::Subscription& subscription,
+                                      bool& publish,
+                                      SessionState& after) noexcept {
     publish = false;
     after = before;
     if (!valid(before) || subscription.familyType != kRosterFamilyType
@@ -159,6 +160,26 @@ bool stage_family3_subscription(const SessionState& before,
         return valid(after);
     }
     return before.family3Phase == Family3Phase::responseOnly;
+}
+
+bool stage_family3_subscription(const SessionState& before,
+                                const middleware::queuez::Subscription& subscription,
+                                bool& publish,
+                                SessionState& after) noexcept {
+    const bool staged = stage_family3_subscription_state(before, subscription, publish, after);
+    // Repeated character creation once pushed a Family-3 version the client had already consumed,
+    // so each subscription records the mirror it saw and what it decided.
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::info,
+                      "ev=queuez stage=family3_sub staged=%d publish=%d active=%d phase=%u "
+                      "version=%d->%d",
+                      staged ? 1 : 0,
+                      publish ? 1 : 0,
+                      before.family3Active ? 1 : 0,
+                      static_cast<unsigned>(before.family3Phase),
+                      before.family3Version,
+                      after.family3Version);
+    return staged;
 }
 
 /**

@@ -42,9 +42,11 @@ constexpr std::size_t kCardFlagOffset = 8;
         static_cast<std::int8_t>(character.gender),
         static_cast<std::int8_t>(character.characterClass),
     };
+    static_assert(state::kCustomisationSize == layout::kHeaderBlockSize);
     std::memcpy(identity.headerBlock.data(),
-                layout::kHeaderBlockBytes.data(),
-                layout::kHeaderBlockBytes.size());
+                character.customised ? character.customisation.data()
+                                     : layout::kHeaderBlockBytes.data(),
+                layout::kHeaderBlockSize);
 
     output = {};
     appearance::apply_sentinels(output);

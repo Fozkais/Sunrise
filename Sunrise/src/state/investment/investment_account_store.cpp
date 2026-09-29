@@ -37,6 +37,28 @@ bool read_characters(AccountState& output) noexcept {
     return result == SQLITE_DONE;
 }
 
+/** A saved look attaches to the character that owns its SOID; a row for a gone character is
+ * ignored and dropped by the next account write. */
+bool read_customisation(AccountState& output) noexcept {
+    Statement rows("SELECT soid,header FROM character_customisation");
+    int result = rows.step();
+    while (result == SQLITE_ROW) {
+        std::uint64_t soid{};
+        std::array<std::uint8_t, kCustomisationSize> header{};
+        if (!rows.column(0, soid) || !rows.blob(1, header)) {
+            return false;
+        }
+        for (std::size_t slot = 0; slot < output.characterCount; ++slot) {
+            if (output.characters[slot].soid == soid) {
+                output.characters[slot].customisation = header;
+                output.characters[slot].customised = true;
+            }
+        }
+        result = rows.step();
+    }
+    return result == SQLITE_DONE;
+}
+
 /** Economy rows keep their authored order and bounded capacity. */
 bool read_rewards(AccountState& output) noexcept {
     Statement rows("SELECT * FROM dismantle_rewards ORDER BY position");
@@ -78,6 +100,15 @@ bool write_characters(const AccountState& value) noexcept {
                         character.equippedTitleRecordIndex,
                         character.acquiredSubclassAbilityMask,
                         character.nextInventorySerial)) {
+            return false;
+        }
+    }
+    Statement looks("INSERT INTO character_customisation VALUES (?,?)");
+    for (std::size_t slot = 0; slot < value.characterCount; ++slot) {
+        const auto& character = value.characters[slot];
+        if (character.customised
+            && !looks.write(character.soid,
+                            std::span<const std::uint8_t>(character.customisation))) {
             return false;
         }
     }
@@ -164,7 +195,8 @@ bool read_account(AccountState& output) noexcept {
     output = {};
     Statement row("SELECT soid,profile_setup_completed FROM account WHERE id=1");
     if (row.step() != SQLITE_ROW || !row.columns(output.primarySoid, output.profileSetupCompleted)
-        || row.step() != SQLITE_DONE || !read_characters(output) || !read_inventory(output)
+        || row.step() != SQLITE_DONE || !read_characters(output) || !read_customisation(output)
+        || !read_inventory(output)
         || !read_rewards(output)) {
         output = {};
         return false;
@@ -195,12 +227,17 @@ bool write_account(const AccountState& value) noexcept {
     Transaction transaction;
     if (!transaction.ready()
         || !execute("DELETE FROM items; DELETE FROM character_stacks; DELETE FROM characters;"
+                    "DELETE FROM character_customisation;"
                     "DELETE FROM profile_items; DELETE FROM dismantle_rewards;")) {
         return false;
     }
     Statement accountRow("INSERT OR REPLACE INTO account VALUES (1,?,?)");
     if (!accountRow.write(value.primarySoid, value.profileSetupCompleted)
         || !write_characters(value) || !write_inventory(value) || !write_settings(value.settings)
+        // A deleted character takes its unlock banks with it, so a character created later under
+        // the same SOID starts from nothing.
+        || !execute("DELETE FROM unlocks WHERE owner <> 0 AND owner NOT IN "
+                    "(SELECT soid FROM characters)")
         || !transaction.commit()) {
         return false;
     }

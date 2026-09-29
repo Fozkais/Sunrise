@@ -468,6 +468,17 @@ void arm_account_resync_everywhere() noexcept {
     }
 }
 
+void arm_account_resync_without_roster() noexcept {
+    for (auto& peer : g_sessions) {
+        if (peer.id == 0 || !peer.authenticated || !peer.queuez.family4Active
+            || peer.accountHandle != state::bound_account()) {
+            continue;
+        }
+        peer.accountResyncArmed = true;
+        peer.rosterResyncSuppressed = true;
+    }
+}
+
 /** Extends this peer's flyout hold, clearing a lapsed overlay first. */
 void arm_acquisition_presentation_hold(Session& session) noexcept {
     const std::uint64_t now = GetTickCount64();

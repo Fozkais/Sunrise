@@ -564,6 +564,12 @@ struct Session {
     /** True while another peer's account mutation still needs a full local refresh. */
     bool accountResyncArmed{};
     /**
+     * Set with the resync after a character is created or deleted: the roster is left out of it,
+     * because the Client asks for the roster again right afterwards and a version-1 increment
+     * ahead of that full body can arrive on a store that already consumed one.
+     */
+    bool rosterResyncSuppressed{};
+    /**
      * Tick count after which the owed ability-icon refresh may go out. A subclass selection
      * invalidates the published ability buckets and the rebuild runs off the Client
      * content-extraction pump, so the inline refresh can carry empty ones; this one re-derives.
@@ -614,6 +620,9 @@ void arm_account_resync_elsewhere(Session& origin) noexcept;
 
 /** Arms every Family-4 peer, including the origin, for a full account resync. */
 void arm_account_resync_everywhere() noexcept;
+
+/** As above, without the Family-3 roster: the Client re-subscribes to it after a roster change. */
+void arm_account_resync_without_roster() noexcept;
 
 /** Holds this peer's full Family-4 refreshes until its acquisition flyout has finished. */
 void arm_acquisition_presentation_hold(Session& session) noexcept;

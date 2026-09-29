@@ -23,12 +23,15 @@ bool install() noexcept {
     const bool probe = install_lifetime_gate_probe();
     // Optional: without it a continuation still works, with the loading movies playing.
     static_cast<void>(install_loading_suppression());
+    // TEMPORARY: remove before release, see character_select_hold.cpp.
+    static_cast<void>(install_character_select_hold());
     g_installed.store(worldStep || sliceSet || probe, std::memory_order_release);
     return worldStep && sliceSet && probe;
 }
 
 /** Clears both accessors, in the reverse order of install. */
 void uninstall() noexcept {
+    uninstall_character_select_hold();
     uninstall_loading_suppression();
     uninstall_lifetime_gate_probe();
     spawn::uninstall_targets();

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <string>
 #include <string_view>
 
@@ -23,6 +24,8 @@ enum class Bank : int {
 };
 
 [[nodiscard]] bool initialize(void* module) noexcept;
+/** @return The folder holding the database, empty before initialization. */
+[[nodiscard]] const std::filesystem::path& data_directory() noexcept;
 [[nodiscard]] bool validate() noexcept;
 [[nodiscard]] bool open(std::string_view path,
                         std::string_view schema,

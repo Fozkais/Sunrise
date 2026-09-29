@@ -1,5 +1,5 @@
 PRAGMA application_id = 1397902921;
-PRAGMA user_version = 2;
+PRAGMA user_version = 4;
 
 CREATE TABLE account (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -79,15 +79,18 @@ CREATE TABLE dismantle_rewards (
     masterwork INTEGER NOT NULL CHECK (masterwork BETWEEN 0 AND 2)
 ) STRICT;
 
+/* Unlock banks. Owner 0 holds the account-wide banks; the per-character banks belong to the
+   character's SOID, so a roster shift or a deletion never moves one character's unlocks onto
+   another. Rows of a deleted character are removed with it. */
 CREATE TABLE unlocks (
-    character_slot INTEGER NOT NULL CHECK (character_slot BETWEEN -1 AND 2),
+    owner INTEGER NOT NULL,
     bank INTEGER NOT NULL CHECK (bank BETWEEN 0 AND 7),
     slot INTEGER NOT NULL CHECK (slot >= 0),
     lane INTEGER NOT NULL CHECK (lane BETWEEN 0 AND 2),
     value INTEGER NOT NULL CHECK (value BETWEEN -2147483648 AND 2147483647),
-    PRIMARY KEY (character_slot, bank, slot, lane),
-    CHECK ((bank IN (0, 1, 3, 6) AND character_slot = -1)
-        OR (bank IN (2, 4, 5, 7) AND character_slot >= 0))
+    PRIMARY KEY (owner, bank, slot, lane),
+    CHECK ((bank IN (0, 1, 3, 6) AND owner = 0)
+        OR (bank IN (2, 4, 5, 7) AND owner <> 0))
 ) STRICT;
 
 CREATE TABLE family5 (
@@ -116,4 +119,11 @@ CREATE TABLE pending_rewards (
     kind INTEGER NOT NULL CHECK (kind IN (0, 1)),
     definition_hash INTEGER NOT NULL CHECK (definition_hash BETWEEN 1 AND 4294967295),
     quantity INTEGER NOT NULL CHECK (quantity > 0)
+) STRICT;
+
+/* The look a player chose at creation, keyed by character SOID so it survives roster shifts.
+   A character without a row publishes the authored default header. */
+CREATE TABLE character_customisation (
+    soid INTEGER PRIMARY KEY,
+    header BLOB NOT NULL CHECK (length(header) = 36)
 ) STRICT;

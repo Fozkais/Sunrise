@@ -33,16 +33,19 @@ bool bind_identity(std::uint64_t primarySoid) noexcept {
     }
 
     std::array<std::size_t, kCharacterCapacity> slots{};
+    std::array<std::uint64_t, kCharacterCapacity> previous{};
     std::size_t count = 0;
     {
-        Statement characters("SELECT slot FROM characters ORDER BY slot");
+        Statement characters("SELECT slot,soid FROM characters ORDER BY slot");
         int result = characters.step();
         while (result == SQLITE_ROW) {
             std::size_t slot = 0;
-            if (count == slots.size() || !characters.column(0, slot)
+            std::uint64_t soid = 0;
+            if (count == slots.size() || !characters.columns(slot, soid)
                 || slot >= kCharacterCapacity) {
                 return false;
             }
+            previous[count] = soid;
             slots[count++] = slot;
             result = characters.step();
         }
@@ -53,11 +56,14 @@ bool bind_identity(std::uint64_t primarySoid) noexcept {
     // Finalize the read before updating that table on this connection.
     Statement accountUpdate("UPDATE account SET soid=? WHERE id=1");
     Statement characterUpdate("UPDATE characters SET soid=? WHERE slot=?");
+    // A character's unlock banks follow its SOID.
+    Statement unlockUpdate("UPDATE unlocks SET owner=? WHERE owner=?");
     if (!accountUpdate.write(primarySoid)) {
         return false;
     }
     for (std::size_t index = 0; index < count; ++index) {
-        if (!characterUpdate.write(primarySoid + slots[index] + 1, slots[index])) {
+        if (!characterUpdate.write(primarySoid + slots[index] + 1, slots[index])
+            || !unlockUpdate.write(primarySoid + slots[index] + 1, previous[index])) {
             return false;
         }
     }

@@ -1,11 +1,16 @@
 #include <Windows.h>
 
+#include <filesystem>
+
 #include "../../../resources/resource.h"
 #include "../../core/filesystem/path.h"
 #include "store_internal.h"
 
 namespace sunrise::state::investment::store {
 namespace {
+
+/** The folder holding the database, kept for files that live beside it. */
+std::filesystem::path g_dataDirectory;
 
 /** Resource views borrow bytes from the loaded DLL. */
 bool resource(void* module, int identifier, std::string_view& output) noexcept {
@@ -38,6 +43,7 @@ bool initialize(void* module) noexcept {
         && GetLastError() != ERROR_ALREADY_EXISTS) {
         return false;
     }
+    g_dataDirectory = std::filesystem::path(directory.chars.data());
     if (!core::path::append(directory, L"\\investment.sqlite3")) {
         return false;
     }
@@ -76,6 +82,10 @@ bool initialize(void* module) noexcept {
         return false;
     }
     return true;
+}
+
+const std::filesystem::path& data_directory() noexcept {
+    return g_dataDirectory;
 }
 
 } // namespace sunrise::state::investment::store

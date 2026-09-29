@@ -219,6 +219,13 @@ bool stage_roster_appearance_refresh(const SessionState& before,
     ++refresh.after.family3Version;
     refresh.characterSoid = characterSoid;
     refresh.includeRoster = includeRoster;
+    core::log::writef(core::log::Channel::server,
+                      core::log::Level::info,
+                      "ev=queuez stage=family3_refresh version=%d->%d roster=%d phase=%u",
+                      before.family3Version,
+                      refresh.after.family3Version,
+                      includeRoster ? 1 : 0,
+                      static_cast<unsigned>(before.family3Phase));
     const bool staged = valid(refresh.after);
     if (!staged) {
         std::array<char, core::log::kLineCapacity> line{};

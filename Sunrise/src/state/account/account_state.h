@@ -12,6 +12,8 @@ namespace sunrise::state {
 
 /** One account can own at most the 3 playable character slots. */
 inline constexpr std::size_t kCharacterCapacity = 3;
+/** The native customisation header (face, hair, marks) both character records carry verbatim. */
+inline constexpr std::size_t kCustomisationSize = 36;
 /** A server-authored dismantle policy: a few rows per rarity and gear class. */
 inline constexpr std::size_t kDismantleRewardPolicyCapacity = 32;
 /** Native sentinel used when a character has no title equipped. */
@@ -139,6 +141,12 @@ struct CharacterState {
     bool previewAvailable{};
     /** Authored scalar kept for the family-specific character presentation encoders. */
     float appearanceValue{};
+    /**
+     * The look the player chose at creation, stored as the native header. When `customised` is
+     * false the character publishes the authored default header instead.
+     */
+    std::array<std::uint8_t, kCustomisationSize> customisation{};
+    bool customised{};
     /** Compact default destination hash used until a later runtime selection replaces it. */
     std::uint32_t lastOrbitedDestination{};
     /**

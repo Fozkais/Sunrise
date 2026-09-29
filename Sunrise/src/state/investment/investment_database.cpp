@@ -1,3 +1,5 @@
+#include <cstring>
+
 #include "../account/account_context.h"
 #include "store_internal.h"
 
@@ -87,6 +89,21 @@ bool Statement::text(int column, std::string_view& value) const noexcept {
     return true;
 }
 
+/** @return Borrowed blob bytes copied out when the column holds exactly the requested length. */
+bool Statement::blob(int column, std::span<std::uint8_t> value) const noexcept {
+    if (!local_account_access() || statement_ == nullptr
+        || sqlite3_column_type(statement_, column) != SQLITE_BLOB
+        || sqlite3_column_bytes(statement_, column) != static_cast<int>(value.size())) {
+        return false;
+    }
+    const void* bytes = sqlite3_column_blob(statement_, column);
+    if (bytes == nullptr) {
+        return false;
+    }
+    std::memcpy(value.data(), bytes, value.size());
+    return true;
+}
+
 /** New databases receive schema and defaults in one durable transaction. */
 bool open(std::string_view path,
           std::string_view schema,
@@ -127,12 +144,14 @@ bool open(std::string_view path,
                 && execute(preferenceSchema.c_str()) && execute(preferenceDefaults.c_str())
                 && transaction.commit();
     } else if (ready) {
-        // Version 2 adds account preferences and per-item seen state.
-        constexpr int kSchemaVersion = 2;
+        // Version 2 adds account preferences and per-item seen state; version 3 adds the
+        // customisation header a player chose at character creation; version 4 keys the
+        // per-character unlock banks by character SOID instead of roster slot.
+        constexpr int kSchemaVersion = 4;
         constexpr int kApplicationId = 1397902921;
         int application = 0;
         Statement query("PRAGMA application_id");
-        ready = (version == 1 || version == kSchemaVersion) && query.step() == SQLITE_ROW
+        ready = (version >= 1 && version <= kSchemaVersion) && query.step() == SQLITE_ROW
                 && query.column(0, application) && application == kApplicationId;
     }
     if (ready && version == 1) {
@@ -145,6 +164,39 @@ bool open(std::string_view path,
                 "IN(0,1));")
             && execute(preferenceSchema.c_str()) && execute(preferenceDefaults.c_str())
             && execute("PRAGMA user_version=2") && transaction.commit();
+        version = ready ? 2 : version;
+    }
+    if (ready && version == 2) {
+        Transaction transaction;
+        ready = transaction.ready()
+                && execute("CREATE TABLE IF NOT EXISTS character_customisation ("
+                           "soid INTEGER PRIMARY KEY,"
+                           "header BLOB NOT NULL CHECK (length(header) = 36)) STRICT;")
+                && execute("PRAGMA user_version=3") && transaction.commit();
+        version = ready ? 3 : version;
+    }
+    if (ready && version == 3) {
+        // Rows of the account banks move to owner 0; each character bank moves to the SOID of the
+        // character that held its slot, and rows for an empty slot are dropped.
+        Transaction transaction;
+        ready = transaction.ready()
+                && execute("CREATE TABLE unlocks_v4 ("
+                           "owner INTEGER NOT NULL,"
+                           "bank INTEGER NOT NULL CHECK (bank BETWEEN 0 AND 7),"
+                           "slot INTEGER NOT NULL CHECK (slot >= 0),"
+                           "lane INTEGER NOT NULL CHECK (lane BETWEEN 0 AND 2),"
+                           "value INTEGER NOT NULL CHECK (value BETWEEN -2147483648 AND 2147483647),"
+                           "PRIMARY KEY (owner, bank, slot, lane),"
+                           "CHECK ((bank IN (0, 1, 3, 6) AND owner = 0)"
+                           " OR (bank IN (2, 4, 5, 7) AND owner <> 0))) STRICT;"
+                           "INSERT INTO unlocks_v4 SELECT 0, bank, slot, lane, value"
+                           " FROM unlocks WHERE character_slot = -1;"
+                           "INSERT INTO unlocks_v4 SELECT c.soid, u.bank, u.slot, u.lane, u.value"
+                           " FROM unlocks u JOIN characters c ON c.slot = u.character_slot"
+                           " WHERE u.character_slot >= 0;"
+                           "DROP TABLE unlocks;"
+                           "ALTER TABLE unlocks_v4 RENAME TO unlocks;")
+                && execute("PRAGMA user_version=4") && transaction.commit();
     }
     if (!ready) {
         shutdown();

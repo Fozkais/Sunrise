@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <mutex>
+#include <span>
 #include <sqlite3.h>
 #include <string>
 #include <type_traits>
@@ -56,6 +57,8 @@ public:
     Statement& operator=(const Statement&) = delete;
     [[nodiscard]] int step() noexcept;
     [[nodiscard]] bool text(int column, std::string_view& value) const noexcept;
+    /** Copies a blob column of exactly `value.size()` bytes; any other length fails. */
+    [[nodiscard]] bool blob(int column, std::span<std::uint8_t> value) const noexcept;
 
     /** Reads one typed SQL scalar without narrowing an out-of-range value. */
     template <typename T> [[nodiscard]] bool column(int index, T& value) const noexcept {
@@ -115,7 +118,11 @@ public:
 private:
     /** SQL integers preserve all 64 identity bits; text bindings copy their input. */
     template <typename T> [[nodiscard]] bool bind(int index, T value) noexcept {
-        if constexpr (std::is_convertible_v<T, std::string_view>) {
+        if constexpr (std::is_same_v<T, std::span<const std::uint8_t>>) {
+            return sqlite3_bind_blob64(
+                       statement_, index, value.data(), value.size(), copy_text())
+                   == SQLITE_OK;
+        } else if constexpr (std::is_convertible_v<T, std::string_view>) {
             const std::string_view textValue(value);
             return sqlite3_bind_text64(statement_,
                                        index,
