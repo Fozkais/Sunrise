@@ -6,6 +6,7 @@
 #include <limits>
 #include <span>
 
+#include "../../core/logging/log.h"
 #include "../build_data/nodes/definition.h"
 #include "../build_data/nodes/node_catalog.h"
 #include "../build_data/records/record_catalog.h"
@@ -390,6 +391,20 @@ void publish_chapter_gates(Table& table) noexcept {
 
 void clear_lore_objectives(Table& table) noexcept;
 
+/** Logs how many account flags a derivation step left set, so a stray flag can be traced to one. */
+void report_derive_step(const char* step, const Table& table) noexcept {
+    if (!core::log::accepts(core::log::Channel::state, core::log::Level::debug)) {
+        return;
+    }
+    const auto set = static_cast<std::size_t>(
+        std::count(table.accountFlags.begin(), table.accountFlags.end(), kFlagSet));
+    core::log::writef(core::log::Channel::state,
+                      core::log::Level::debug,
+                      "ev=unlock stage=derive step=%s account_flags=%zu",
+                      step,
+                      set);
+}
+
 /** Re-derives every value the claims in the banks imply. Order matters: gates run last. */
 void publish_derived(Table& table) noexcept {
     ensure_cache();
@@ -398,14 +413,18 @@ void publish_derived(Table& table) noexcept {
         clear_lore_objectives(table);
         (void)investment::store::complete_bootstrap("lore");
     }
+    report_derive_step("start", table);
     (void)build_data::complete_exotic_catalyst_objectives(table.objectiveValues);
     (void)build_data::complete_exotic_catalyst_flags(table.accountFlags);
+    report_derive_step("catalyst_flags", table);
     (void)node_catalog::apply_visibility(table.accountFlags);
+    report_derive_step("node_visibility", table);
     (void)node_catalog::apply_character_visibility(
         std::as_writable_bytes(std::span(table.characterObjectFlags)));
     publish_node_progress(table);
     publish_reward_milestones(table);
     publish_chapter_gates(table);
+    report_derive_step("chapter_gates", table);
     (void)node_catalog::apply_category_gates(table.objectiveValues);
 }
 

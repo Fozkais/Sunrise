@@ -33,15 +33,16 @@ struct StarterItem {
 
 /**
  * The starting kit of a new Guardian as the campaign opens, before Adieu swaps it for the damaged
- * set: the Traveler's Chosen sidearm and nothing else to shoot with, and the cosmetic/utility
- * slots (ghost, vehicle, ship, clan banner, emote, finisher, artifact) the real client draws
- * identically for every class. Weapons and armor are level 1, which the light calculation lifts to
- * its 750 power floor. The cosmetic rows come from the bundled authored character
- * (`resources/database/investment_defaults.sql`, character slot 0). The sidearm is the exotic
- * Traveler's Chosen; its damaged common form belongs to Adieu.
+ * set: the Traveler's Chosen sidearm, the Sorrow-MG2 submachine gun and no heavy weapon, and the
+ * cosmetic/utility slots (ghost, vehicle, ship, clan banner, emote, finisher, artifact) the real
+ * client draws identically for every class. Weapons and armor are level 1, which the light
+ * calculation lifts to its 750 power floor. The cosmetic rows come from the authored character
+ * the seed used to carry. The sidearm is the exotic Traveler's Chosen; its damaged common form
+ * belongs to Adieu.
  */
-constexpr std::array<StarterItem, 8> kSharedStarterItems{{
+constexpr std::array<StarterItem, 9> kSharedStarterItems{{
     {authored_inventory::EquipmentSlot::kinetic, 1853180924U, 1},
+    {authored_inventory::EquipmentSlot::energy, 1195725819U, 1},
     {authored_inventory::EquipmentSlot::ghost, 4135938409U, 0},
     {authored_inventory::EquipmentSlot::vehicle, 3317837688U, 0},
     {authored_inventory::EquipmentSlot::ship, 292872938U, 0},
@@ -100,13 +101,30 @@ constexpr std::array<std::array<StarterItem, 7>, 3> kPerClassStarterItems{{
 }};
 
 /**
- * Character flags every authored character carries, and that a new one must hold too: with all
- * of them clear the client treats the character as never having played, plays two cinematics and
- * launches the first mission (mission_zenith) at every sign-in, because nothing here records that
- * mission's completion yet. Which of the six does the skipping is not established. TEMPORARY, until
- * mission progress writes these flags itself.
+ * Character flags a new character holds. TEMPORARY, until mission progress writes them itself.
+ * The two release flags of authored characters (82 and 90, the Dreaming City and Ana Bray) are
+ * left out: a new account starts without them.
  */
-constexpr std::array<std::uint16_t, 6> kStartingCharacterFlags{16, 17, 18, 19, 82, 90};
+constexpr std::array<std::uint16_t, 4> kStartingCharacterFlags{16, 17, 18, 19};
+
+/**
+ * Character-object flag of the "New Light" activity (definition 1041). Left clear, the client
+ * sends a new character into the Cosmodrome mission; set, it skips it. TEMPORARY, until the
+ * mission writes it itself on completion.
+ */
+constexpr std::uint16_t kNewLightObjectFlag = 59;
+
+/** Character-object flag of the "Tower Approach" activity (definition 1044). */
+constexpr std::uint16_t kTowerApproachObjectFlag = 60;
+
+/** Character-object flag that releases the Tower destination (definition 1085). */
+constexpr std::uint16_t kTowerReleaseObjectFlag = 79;
+
+/**
+ * Destination the orbit screen names for a new character: the one the authored characters carry.
+ * Left at zero the orbit title reads "TRIAL MODE" instead of a destination.
+ */
+constexpr std::uint32_t kStartingOrbitDestination = 308080871;
 
 /** Name of the optional file, beside the database, that lists a new character's unlock rows. */
 constexpr const wchar_t* kStartFileName = L"character_start_unlocks.txt";
@@ -164,6 +182,12 @@ std::size_t apply_starting_unlocks() noexcept {
     if (file == nullptr) {
         for (const std::uint16_t flag : kStartingCharacterFlags) {
             written += write(investment::store::Bank::characterFlags, flag, unlocks::kFlagSet) ? 1U : 0U;
+        }
+        for (const std::uint16_t flag :
+             {kNewLightObjectFlag, kTowerApproachObjectFlag, kTowerReleaseObjectFlag}) {
+            written += write(investment::store::Bank::characterObjectFlags, flag, unlocks::kFlagSet)
+                           ? 1U
+                           : 0U;
         }
         return written;
     }
@@ -368,6 +392,7 @@ bool create_character(std::uint8_t characterClass,
     // the family-4 object mirrors into its preview fields. A created character left both at zero.
     character.previewAvailable = true;
     character.appearanceValue = 1.0F;
+    character.lastOrbitedDestination = kStartingOrbitDestination;
     if (customisation.size() == character.customisation.size()) {
         std::copy(customisation.begin(), customisation.end(), character.customisation.begin());
         character.customised = true;

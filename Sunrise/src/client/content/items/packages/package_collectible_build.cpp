@@ -1,7 +1,9 @@
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <limits>
 
+#include "../../../../core/logging/log.h"
 #include "../../../../state/build_data/runtime.h"
 #include "../../../../state/build_data/sobjects/sobject_catalog.h"
 #include "internal.h"
@@ -34,6 +36,59 @@ void read_acquired_flag_slot(std::span<const std::byte> table,
         && instruction[1] < domain::kUnavailableFlagSlot) {
         slot = static_cast<std::uint16_t>(instruction[1]);
     }
+}
+
+/**
+ * Logs the acquired-state expression of a collectible that no single flag gates.
+ * Diagnostic only: these are the entries the client can show as collected with every flag clear.
+ * @param table Collectible table bytes.
+ * @param at Collectible row offset.
+ * @param row Collectible index.
+ * @param hash Collectible hash.
+ */
+void report_ungated_expression(std::span<const std::byte> table,
+                               std::size_t at,
+                               std::uint64_t row,
+                               std::uint32_t hash) noexcept {
+    if (!core::log::accepts(core::log::Channel::client, core::log::Level::info)) {
+        return;
+    }
+    tables::Array expression{};
+    if (!tables::find_optional_array_at(
+            table, at + tables::kCollectibleAcquiredExpressionField, expression)) {
+        core::log::writef(core::log::Channel::client,
+                          core::log::Level::info,
+                          "ev=pkg stage=collectible_expr row=%llu hash=%08X shape=unreadable",
+                          static_cast<unsigned long long>(row),
+                          hash);
+        return;
+    }
+    // Up to four instructions, each an opcode and an operand.
+    constexpr std::size_t kShown = 4;
+    std::array<std::uint32_t, 2 * kShown> words{};
+    const std::size_t shown = (std::min<std::size_t>)(expression.count, kShown);
+    for (std::size_t index = 0; index < shown; ++index) {
+        const std::size_t offset = expression.dataOffset + index * sizeof(std::uint32_t) * 2;
+        if (offset + 2 * sizeof(std::uint32_t) <= table.size()) {
+            std::memcpy(&words[2 * index], table.data() + offset, 2 * sizeof(std::uint32_t));
+        }
+    }
+    core::log::writef(core::log::Channel::client,
+                      core::log::Level::info,
+                      "ev=pkg stage=collectible_expr row=%llu hash=%08X count=%llu class=%08X "
+                      "ops=%X:%X,%X:%X,%X:%X,%X:%X",
+                      static_cast<unsigned long long>(row),
+                      hash,
+                      static_cast<unsigned long long>(expression.count),
+                      static_cast<unsigned>(expression.elementClass),
+                      words[0],
+                      words[1],
+                      words[2],
+                      words[3],
+                      words[4],
+                      words[5],
+                      words[6],
+                      words[7]);
 }
 
 /**
@@ -198,6 +253,8 @@ bool build_collectibles(const reader::Source& source,
         if (output.acquiredFlagSlot != domain::kUnavailableFlagSlot) {
             output.acquiredFlagIndex =
                 flag_bank_index(slotTable, slotRows, output.acquiredFlagSlot);
+        } else {
+            report_ungated_expression(table, at, row, collectibleHash);
         }
         if (requirementSetIndex == domain::kUnavailableMaterialRequirementSetIndex) {
             continue;

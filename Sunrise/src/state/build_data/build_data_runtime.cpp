@@ -167,6 +167,9 @@ bool initialize(void* module, std::uint64_t configuredEquipmentHash) noexcept {
     runtime::ability_buckets::publish();
     runtime::spawn_catalog::publish();
     runtime::name_catalog::publish();
+    // A cache freezes State, so the name build cannot publish later: without this the domain would
+    // read as missing and the package pass would rebuild the names on every slice.
+    runtime::unlock_flag_names::publish();
     persistenceState.catalystError = catalystCatalogAvailable
                                          ? items::catalysts::Error::none
                                          : items::catalysts::Error::unsupportedBuild;

@@ -3,6 +3,7 @@
 #include <array>
 #include <shared_mutex>
 
+#include "../../unlocks/unlocks_records.h"
 #include "../table.h"
 #include "core/threading/srw_lock.h"
 
@@ -68,14 +69,18 @@ bool replace(std::span<const Definition> definitions) noexcept {
     if (!valid(definitions)) {
         return false;
     }
-    const std::lock_guard guard(g_lock);
-    const std::span<Definition> storage = g_definitions.reset(definitions.size());
-    if (storage.size() != definitions.size()) {
-        return false;
+    {
+        const std::lock_guard guard(g_lock);
+        const std::span<Definition> storage = g_definitions.reset(definitions.size());
+        if (storage.size() != definitions.size()) {
+            return false;
+        }
+        for (const Definition& definition : definitions) {
+            storage[definition.collectibleIndex] = definition;
+        }
     }
-    for (const Definition& definition : definitions) {
-        storage[definition.collectibleIndex] = definition;
-    }
+    // Which lore gates may be set depends on which flags a collectible reads.
+    unlocks::records::republish();
     return true;
 }
 
@@ -115,6 +120,20 @@ bool find_granting(std::uint16_t itemDefinitionIndex, std::uint16_t& collectible
     for (const Definition& definition : g_definitions.rows()) {
         if (definition.itemDefinitionIndex == itemDefinitionIndex) {
             collectibleIndex = definition.collectibleIndex;
+            return true;
+        }
+    }
+    return false;
+}
+
+/** Answers whether any published collectible tests one flag bank row. */
+bool tests_flag_index(std::uint16_t flagIndex) noexcept {
+    if (flagIndex == kUnavailableFlagIndex) {
+        return false;
+    }
+    const std::shared_lock guard(g_lock);
+    for (const Definition& definition : g_definitions.rows()) {
+        if (definition.acquiredFlagIndex == flagIndex) {
             return true;
         }
     }

@@ -4,6 +4,7 @@
 
 #include "../../unlocks/definition.h"
 #include "../../unlocks/unlocks_records.h"
+#include "../collectibles/collectible_catalog.h"
 #include "../records/definition.h"
 #include "../table.h"
 #include "core/threading/srw_lock.h"
@@ -76,13 +77,18 @@ void for_each(void* context, void (*visit)(void*, const Definition&) noexcept) n
     }
 }
 
-/** Sets the visibility gate of every lore book category. */
+/**
+ * Sets the visibility gate of every lore book category.
+ * A gate that a collectible also reads as its acquired state stays clear: setting it would show
+ * that collectible as owned on an account that never obtained it.
+ */
 std::size_t apply_visibility(std::span<std::uint8_t> accountFlags) noexcept {
     const std::shared_lock guard(g_lock);
     std::size_t set = 0;
     for (const Definition& node : g_definitions.rows()) {
         if (!node.loreBook || node.visibilityFlagIndex == kUnavailableFlagIndex
-            || static_cast<std::size_t>(node.visibilityFlagIndex) >= accountFlags.size()) {
+            || static_cast<std::size_t>(node.visibilityFlagIndex) >= accountFlags.size()
+            || collectibles::tests_flag_index(node.visibilityFlagIndex)) {
             continue;
         }
         accountFlags[node.visibilityFlagIndex] = unlocks::kFlagSet;

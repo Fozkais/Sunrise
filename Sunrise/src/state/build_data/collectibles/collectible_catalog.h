@@ -81,6 +81,13 @@ void clear() noexcept;
 [[nodiscard]] bool find_granting(std::uint16_t itemDefinitionIndex,
                                  std::uint16_t& collectibleIndex) noexcept;
 
+/**
+ * Answers whether any collectible tests one flag bank row as its acquired state.
+ * @param flagIndex Bank row to look for.
+ * @return True when such a collectible exists, so setting that flag would mark it acquired.
+ */
+[[nodiscard]] bool tests_flag_index(std::uint16_t flagIndex) noexcept;
+
 /** Copies every row in native collectible-index order. */
 [[nodiscard]] bool snapshot(std::span<Definition> output, std::size_t& count) noexcept;
 

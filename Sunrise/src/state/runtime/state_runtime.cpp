@@ -10,6 +10,7 @@
 #include <memory>
 #include <new>
 #include <span>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -37,6 +38,9 @@ SRWLOCK g_stateLock{SRWLOCK_INIT};
 } // namespace runtime::storage
 
 namespace {
+
+/** Fixed equipment identity handed to the build data cache; see the call in `initialize`. */
+constexpr std::uint64_t kCacheEquipmentIdentity = 0;
 
 /** Network-order IPv4 loopback returned by the in-process SignOn route. */
 constexpr std::uint32_t kLoopbackAddress = 0x7F000001;
@@ -134,6 +138,64 @@ template <std::size_t Size>
                            static_cast<ULONG>(output.size()),
                            BCRYPT_USE_SYSTEM_PREFERRED_RNG)
            >= 0;
+}
+
+/** A character look the client's creation screen produced: race, gender and the native header. */
+struct DefaultLook {
+    std::uint8_t race;
+    std::uint8_t gender;
+    std::array<std::uint8_t, kCustomisationSize> header;
+};
+
+/**
+ * Looks captured from real creations, so every header is one the client accepts. A header that
+ * does not belong to a race and gender makes the client drop the character.
+ */
+constexpr std::array<DefaultLook, 3> kDefaultLooks{{
+    {0, 0, {0x23, 0x00, 0x00, 0x00, 0x00, 0x00, 0xE2, 0x02, 0xF4, 0x02, 0x40, 0x02,
+            0x48, 0x03, 0x49, 0x03, 0x4A, 0x03, 0xFF, 0xFF, 0xFF, 0xFF, 0x13, 0x03,
+            0xC7, 0x02, 0x00, 0x00, 0xC5, 0x9D, 0x1C, 0x81, 0x01, 0x00, 0x00, 0x00}},
+    {2, 0, {0x17, 0x00, 0x05, 0x00, 0x00, 0x00, 0xD7, 0x01, 0xFB, 0x01, 0x8F, 0x01,
+            0x04, 0x02, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xB9, 0x01, 0x00, 0x00, 0xC5, 0x9D, 0x1C, 0x81, 0x01, 0x00, 0x00, 0x00}},
+    {2, 0, {0x15, 0x00, 0x0D, 0x00, 0x00, 0x00, 0xD4, 0x01, 0xFF, 0x01, 0x93, 0x01,
+            0x01, 0x02, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            0xB9, 0x01, 0x00, 0x00, 0xC5, 0x9D, 0x1C, 0x81, 0x01, 0x00, 0x00, 0x00}},
+}};
+
+/**
+ * Gives an account that has never had a character its default Hunter, once.
+ * A new account has no character to show on the character select screen, and the client does not
+ * yet accept the first character created there (the banner record it needs is never registered),
+ * so the account starts with one Hunter in the base kit and a look picked among the captured ones.
+ * The marker keeps it from coming back after the player deletes it.
+ * @param account Account read from the database; re-read when the character was created.
+ */
+void seed_default_character(AccountState& account) noexcept {
+    constexpr std::string_view kMarker = "default_character";
+    constexpr auto kHunter = static_cast<std::uint8_t>(CharacterClass::hunter);
+    if (account.characterCount != 0 || investment::store::bootstrap_completed(kMarker)) {
+        return;
+    }
+    std::array<std::byte, 1> pick{};
+    if (!randomize(pick)) {
+        return;
+    }
+    const DefaultLook& look =
+        kDefaultLooks[std::to_integer<std::size_t>(pick[0]) % kDefaultLooks.size()];
+    std::uint64_t soid = 0;
+    if (!create_character(kHunter, look.gender, look.race, look.header, soid)
+        || !investment::store::complete_bootstrap(kMarker)
+        || !investment::store::read_account(account)) {
+        core::log::write(core::log::Channel::state,
+                         core::log::Level::warn,
+                         "ev=account stage=default_character result=fail");
+        return;
+    }
+    core::log::writef(core::log::Channel::state,
+                      core::log::Level::info,
+                      "ev=account stage=default_character result=ok soid=0x%016llX",
+                      static_cast<unsigned long long>(soid));
 }
 
 /** Erases owned payload bytes before releasing their vector storage, then resets valid State. */
@@ -253,7 +315,11 @@ bool initialize(void* module,
         || !activity::defaults::valid(activityDefaults)) {
         return false;
     }
-    if (!build_data::initialize(module, runtime::equipment::configured_hash(*runtimeAccount))) {
+    seed_default_character(*runtimeAccount);
+    // The cache identity must not follow the roster: characters are created and deleted at
+    // runtime, and every change would make the whole build data stale. Item details are extracted
+    // for every installed item, so no cached domain depends on which items a character carries.
+    if (!build_data::initialize(module, kCacheEquipmentIdentity)) {
         return false;
     }
     build_data::set_exotic_catalyst_completion_enabled(
