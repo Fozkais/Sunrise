@@ -238,23 +238,19 @@ bool process(const ServiceRoute& route,
             // outcome flag at the end of this file only lands on the handled path. Without this
             // the character is gone from disk while the client keeps a roster that names it.
             sunrise::server::bap::arm_account_resync_everywhere();
-            // The roster shrank and delete_character has already moved the selection onto a
-            // survivor, so the client needs the Family-4 character object moved with it. Opcode
-            // 502 feeds the Client's Family-4 version wait: the reply has to name the revision the
-            // wait should expect, the staged one when a publication is coming and the no-wait
-            // constant when none is -- left at its default the field reads as revision zero, which
-            // the wait blocks on, and the roster screen never finishes the delete it just asked for.
+            // The roster shrank, and the client is still on the character-select step. Nothing
+            // here may move the selection: a selected character is a pick, and a pick is what
+            // leaves the screen for orbit, so the delete would skip the roster it just changed.
+            // The account object the armed resync re-encodes already carries the new roster count,
+            // so the reply only has to name the revision that resync will publish -- the same
+            // "name the following resync" contract the claim path below uses -- and the step waits
+            // on it instead of walking on. Left at its default the field reads as revision zero,
+            // which the wait blocks on, and the roster screen never finishes the delete it asked
+            // for.
             std::int32_t deletionVersion = middleware::web_service::kNoFamily4Publication;
-            const std::uint64_t survivorSoid =
-                state::account::selected_character_soid(state::account_snapshot());
-            auto* deletionSelect = emplace_transaction<queuez::SelectCharacter>(outcome);
-            if (survivorSoid != 0 && deletionSelect != nullptr
-                && queuez::stage_select_character(queuezState, survivorSoid, *deletionSelect)) {
-                outcome.hasSelectCharacter = true;
-                deletionVersion = deletionSelect->after.family4Version;
-            } else {
-                clear_transaction(outcome);
-                sunrise::server::bap::arm_account_resync_everywhere();
+            if (queuezState.family4Active
+                && queuezState.family4Version != (std::numeric_limits<std::int32_t>::max)()) {
+                deletionVersion = queuezState.family4Version + 1;
             }
             core::log::write(
                 core::log::Channel::server, core::log::Level::info, "ev=ws502 stage=delete result=ok");
@@ -292,20 +288,18 @@ bool process(const ServiceRoute& route,
             // As in the delete branch: the account is already changed and written, but the caller
             // can still drop the frame, and the outcome flag only lands on the handled path.
             sunrise::server::bap::arm_account_resync_everywhere();
-            // create_character marks the new character selected, and the client is waiting for the
-            // Family-4 character object to move onto it. A change-character patch cannot do that
-            // here: it refuses unless family three is in its normal phase, and the creation flow
-            // leaves it outside that phase, so the client would wait forever on a publication that
-            // was never staged. Selecting is both ungated and what the client actually asked for.
+            // The new character joins the roster unselected (see create_character), and the client
+            // is still on the character-select step. Selecting it here would be a pick the player
+            // never made, and a pick is what leaves the step for orbit, so creation would skip the
+            // roster it just changed. The armed resync re-encodes the account object with the new
+            // roster count, so the reply only names the revision that resync will publish and the
+            // step waits on it. A change-character patch cannot do this: it refuses unless family
+            // three is in its normal phase, and the creation flow leaves it outside that phase, so
+            // the client would wait forever on a publication that was never staged.
             std::int32_t creationVersion = middleware::web_service::kNoFamily4Publication;
-            auto* creationSelect = emplace_transaction<queuez::SelectCharacter>(outcome);
-            if (creationSelect != nullptr
-                && queuez::stage_select_character(queuezState, characterSoid, *creationSelect)) {
-                outcome.hasSelectCharacter = true;
-                creationVersion = creationSelect->after.family4Version;
-            } else {
-                clear_transaction(outcome);
-                sunrise::server::bap::arm_account_resync_everywhere();
+            if (queuezState.family4Active
+                && queuezState.family4Version != (std::numeric_limits<std::int32_t>::max)()) {
+                creationVersion = queuezState.family4Version + 1;
             }
             core::log::write(core::log::Channel::server,
                              core::log::Level::info,

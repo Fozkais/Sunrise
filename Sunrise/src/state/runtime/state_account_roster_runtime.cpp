@@ -216,11 +216,9 @@ bool create_character(std::uint8_t characterClass,
     character.appearanceHeader = appearanceHeader;
     character.appearanceHeaderValid = true;
 
-    // Select the new character and deselect all others.
-    for (std::size_t i = 0; i < candidate.characterCount; ++i) {
-        candidate.characters[i].selected = false;
-    }
-    character.selected = true;
+    // The new character joins the roster unselected. Marking it selected here would be a pick
+    // the player never made, and a pick is what leaves the character-select step for orbit, so
+    // creation would skip the roster it just changed. Nothing is picked until the player picks.
     ++candidate.characterCount;
 
     // Counted above so the fresh-SOID scan inside sees this character's own items as they are
@@ -289,17 +287,10 @@ bool delete_character(std::uint64_t characterSoid) noexcept {
     --candidate.characterCount;
     candidate.characters[candidate.characterCount] = {};
 
-    // Select the first character if the deleted one was selected.
-    bool hasSelection = false;
-    for (std::size_t i = 0; i < candidate.characterCount; ++i) {
-        if (candidate.characters[i].selected) {
-            hasSelection = true;
-            break;
-        }
-    }
-    if (!hasSelection && candidate.characterCount > 0) {
-        candidate.characters[0].selected = true;
-    }
+    // Removing a character never creates a selection. The deleted character's own flag left with
+    // its slot, and handing the selection to a survivor would be a pick the player never made --
+    // which is what leaves the character-select step for orbit, skipping the shrunken roster the
+    // delete just produced. The selection moves only when the player picks (opcodes 504 and 505).
 
     if (!account::valid(candidate) || !investment::store::write_account(candidate)) {
         investment::store::g_mutex.unlock();

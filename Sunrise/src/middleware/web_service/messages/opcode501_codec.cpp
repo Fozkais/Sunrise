@@ -21,11 +21,7 @@ bool encode_response(const Message& message,
     if (output.size() < kEnvelopeHeaderSize) {
         return false;
     }
-    encoding::write_u16_be(output.first<encoding::kU16Size>(), message.opcode);
-    encoding::write_u32_be(output.subspan<encoding::kU16Size, encoding::kU32Size>(),
-                           message.transactionId);
-
-    encoding::bits::Writer writer(output.subspan(kEnvelopeHeaderSize));
+    encoding::bits::Writer writer = begin_response(message, output);
     // The id carries no presence bit or bias.
     bool encoded = status::write_fields(writer, ResponseShape::statusPair, status)
                    && writer.write(characterSoid, kCharacterSoidWidth)
