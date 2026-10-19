@@ -14,6 +14,7 @@
 #include "../../../../../middleware/datagen/definitions.h"
 #include "../../../../../state/account/inventory/inventory_state.h"
 #include "../../../../../state/build_data/items/item_catalog.h"
+#include "../../../../../state/equipment/light/resolution/configured_equipment_light_resolver.h"
 #include "../../../../../state/runtime/runtime.h"
 #include "internal.h"
 #include "snapshot_storage.h"
@@ -24,6 +25,8 @@ namespace {
 /** One line carries the soid, the object count and the encoded size. */
 constexpr std::size_t kReportCapacity = 160;
 
+/** Where the member record carries the signed Power the fireteam row displays. */
+constexpr std::size_t kPowerOffset = 20;
 /** Where the member record carries the emblem the panel row reads. */
 constexpr std::size_t kEmblemDefinitionOffset = 36;
 constexpr std::size_t kEmblemVariantOffset = 38;
@@ -66,6 +69,23 @@ constexpr std::uint16_t kEmptyDefinitionIndex = 0xFFFFU;
     return false;
 }
 
+/**
+ * Computes the selected character's Power, the same value the banner and character card show.
+ * @param account Account snapshot, already read under the lock by the caller.
+ * @param power Receives the equipment light plus the artifact bonus, or 0 on failure.
+ * @return False when nothing is selected or an equipped item cannot be resolved.
+ */
+[[nodiscard]] bool selected_character_power(const state::AccountState& account,
+                                            std::int32_t& power) noexcept {
+    power = 0;
+    for (std::size_t index = 0; index < account.characterCount; ++index) {
+        if (account.characters[index].selected) {
+            return state::equipment::light::resolution::character_light(account, index, power);
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 /** Builds the family-two snapshot carrying the social roster directory and member record. */
@@ -93,6 +113,11 @@ bool prepare_social_roster(Scratch& scratch,
     if (!selected_emblem_definition_index(account, emblem, emblemHash)) {
         emblem = kEmptyDefinitionIndex;
     }
+    // Zero is what the row showed before any Power was written, so a failed lookup keeps it.
+    std::int32_t power = 0;
+    if (!selected_character_power(account, power)) {
+        power = 0;
+    }
 
     Prepared staged{};
     std::size_t objectCount = 0;
@@ -102,7 +127,8 @@ bool prepare_social_roster(Scratch& scratch,
     /**
      * Writes one object and stages it.
      * Both lookups match on the first qword, so the directory leads with the account soid and
-     * repeats it at +8 as the link the member record leads with. Only the member has the emblem.
+     * repeats it at +8 as the link the member record leads with. Only the member has the Power
+     * and the emblem.
      */
     const auto emit = [&](std::size_t size, std::uint32_t id, bool directory) noexcept {
         if (objectCount >= staged.objects.size() || size < kEmblemVariantOffset + sizeof emblem) {
@@ -117,6 +143,7 @@ bool prepare_social_roster(Scratch& scratch,
                         sizeof account.primarySoid);
         } else {
             std::memcpy(body.data(), &account.primarySoid, sizeof account.primarySoid);
+            std::memcpy(body.data() + kPowerOffset, &power, sizeof power);
             std::memcpy(body.data() + kEmblemDefinitionOffset, &emblem, sizeof emblem);
             std::memcpy(body.data() + kEmblemVariantOffset,
                         &kEmptyDefinitionIndex,
@@ -169,12 +196,13 @@ bool prepare_social_roster(Scratch& scratch,
     const int written = std::snprintf(line.data(),
                                       line.size(),
                                       "ev=queuez stage=social_roster result=ok soid=0x%016llX"
-                                      " objects=%zu bytes=%zu emblem=%u hash=0x%08X",
+                                      " objects=%zu bytes=%zu emblem=%u hash=0x%08X power=%d",
                                       static_cast<unsigned long long>(account.primarySoid),
                                       objectCount,
                                       rawUsed,
                                       static_cast<unsigned>(emblem),
-                                      static_cast<unsigned>(emblemHash));
+                                      static_cast<unsigned>(emblemHash),
+                                      static_cast<int>(power));
     if (written > 0) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::info,
