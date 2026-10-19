@@ -24,15 +24,15 @@
 namespace sunrise::server::bap::encrypted::push::snapshot {
 namespace {
 
-/** One line carries the soid, the object count and the encoded size. */
+/** Capacity for one social-roster status line. */
 constexpr std::size_t kReportCapacity = 160;
 
-/** Where the member record carries the signed Power the fireteam row displays. */
+/** Family-two member byte offset for the signed Power field. */
 constexpr std::size_t kPowerOffset = 20;
 /** Where the member record carries the emblem the panel row reads. */
 constexpr std::size_t kEmblemDefinitionOffset = 36;
 constexpr std::size_t kEmblemVariantOffset = 38;
-/** Where the member record carries the Triumph score the fireteam row shows under the Power. */
+/** Family-two member byte offset for the account Triumph score field. */
 constexpr std::size_t kTriumphScoreOffset = 44;
 
 /**
@@ -117,7 +117,7 @@ bool prepare_social_roster(Scratch& scratch,
     if (!selected_emblem_definition_index(account, emblem, emblemHash)) {
         emblem = kEmptyDefinitionIndex;
     }
-    // Zero is what the row showed before any Power was written, so a failed lookup keeps it.
+    // Preserve the zero wire fallback when Power resolution fails.
     std::int32_t power = 0;
     if (!selected_character_power(account, power)) {
         power = 0;
