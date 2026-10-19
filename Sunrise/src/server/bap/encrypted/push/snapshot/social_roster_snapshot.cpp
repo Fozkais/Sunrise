@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <span>
 
 #include "../../../../../core/logging/log.h"
@@ -16,6 +17,7 @@
 #include "../../../../../state/build_data/items/item_catalog.h"
 #include "../../../../../state/equipment/light/resolution/configured_equipment_light_resolver.h"
 #include "../../../../../state/runtime/runtime.h"
+#include "../../../../../state/unlocks/unlocks_records.h"
 #include "internal.h"
 #include "snapshot_storage.h"
 
@@ -30,6 +32,8 @@ constexpr std::size_t kPowerOffset = 20;
 /** Where the member record carries the emblem the panel row reads. */
 constexpr std::size_t kEmblemDefinitionOffset = 36;
 constexpr std::size_t kEmblemVariantOffset = 38;
+/** Where the member record carries the Triumph score the fireteam row shows under the Power. */
+constexpr std::size_t kTriumphScoreOffset = 44;
 
 /**
  * Absent definition index. The variant field always takes it, because a real value there indexes
@@ -118,6 +122,11 @@ bool prepare_social_roster(Scratch& scratch,
     if (!selected_character_power(account, power)) {
         power = 0;
     }
+    // The client reads the score as a signed 32-bit value; the store never publishes it negative.
+    const std::uint32_t storedScore = state::unlocks::records::score();
+    const std::int32_t triumphScore = static_cast<std::int32_t>(
+        (std::min)(storedScore,
+                   static_cast<std::uint32_t>((std::numeric_limits<std::int32_t>::max)())));
 
     Prepared staged{};
     std::size_t objectCount = 0;
@@ -127,11 +136,12 @@ bool prepare_social_roster(Scratch& scratch,
     /**
      * Writes one object and stages it.
      * Both lookups match on the first qword, so the directory leads with the account soid and
-     * repeats it at +8 as the link the member record leads with. Only the member has the Power
-     * and the emblem.
+     * repeats it at +8 as the link the member record leads with. Only the member has the Power,
+     * the emblem and the Triumph score.
      */
     const auto emit = [&](std::size_t size, std::uint32_t id, bool directory) noexcept {
-        if (objectCount >= staged.objects.size() || size < kEmblemVariantOffset + sizeof emblem) {
+        if (objectCount >= staged.objects.size()
+            || size < kTriumphScoreOffset + sizeof triumphScore) {
             return false;
         }
         const auto body = destination.subspan(rawUsed, size);
@@ -148,6 +158,7 @@ bool prepare_social_roster(Scratch& scratch,
             std::memcpy(body.data() + kEmblemVariantOffset,
                         &kEmptyDefinitionIndex,
                         sizeof kEmptyDefinitionIndex);
+            std::memcpy(body.data() + kTriumphScoreOffset, &triumphScore, sizeof triumphScore);
         }
         std::size_t compressedSize = 0;
         if (!compress_object(scratch,
@@ -196,13 +207,15 @@ bool prepare_social_roster(Scratch& scratch,
     const int written = std::snprintf(line.data(),
                                       line.size(),
                                       "ev=queuez stage=social_roster result=ok soid=0x%016llX"
-                                      " objects=%zu bytes=%zu emblem=%u hash=0x%08X power=%d",
+                                      " objects=%zu bytes=%zu emblem=%u hash=0x%08X power=%d"
+                                      " score=%d",
                                       static_cast<unsigned long long>(account.primarySoid),
                                       objectCount,
                                       rawUsed,
                                       static_cast<unsigned>(emblem),
                                       static_cast<unsigned>(emblemHash),
-                                      static_cast<int>(power));
+                                      static_cast<int>(power),
+                                      static_cast<int>(triumphScore));
     if (written > 0) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::info,
