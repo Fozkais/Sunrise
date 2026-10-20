@@ -234,12 +234,13 @@ inline constexpr MemberSpec kSquadStateFields[]{
      .returns = kTaskGroupReturns,
      .note = "the group the squad holds for this objective"},
     field("slot_counts", kIntegerList),
-    field("initial_observation", kBoolean, "a baseline report; it never proves a death"),
-    field("registration_reset", kBoolean, "the counter went back or the spawn generation changed"),
+    field("initial_observation", kBoolean, "the first report of this squad; never a death"),
     field("population_available",
           kBoolean,
-          "false when the counts are zero placeholders for a report without them"),
-    field("objective_revision", kInteger, "1 while a script objective assignment is retained"),
+          "false until an alive count is reported; until then the counts are zero placeholders"),
+    field("objective_revision",
+          kInteger,
+          "objective revision the squad echoed with its costs; 0 before any"),
     field("task_costs", kTaskCosts),
 };
 inline constexpr MemberSpec kEntitySpawnedFields[]{
@@ -661,8 +662,8 @@ inline constexpr EventSpec kEvents[]{
      "on_event_trigger_state",
      "SunriseTriggerStateEvent",
      kTriggerStateGroups,
-     "every accepted occupancy report, including baselines and invalidations; entered and "
-     "exited still fire on a proven change"},
+     "every accepted occupancy report and its counter continuity; it never changes when "
+     "entered and exited fire"},
 };
 
 // --- Program table -----------------------------------------------------------------------------

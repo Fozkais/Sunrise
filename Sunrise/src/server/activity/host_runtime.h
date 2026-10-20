@@ -578,10 +578,8 @@ struct Event final {
     /** Spawn generation the squad Sense echoes from its placement Auth; not the record counter. */
     std::int32_t squadSpawnGeneration{};
     bool squadHasSpawnGeneration{};
-    /** The alive counts were reported; otherwise they are zero placeholders. */
+    /** An alive count was reported for this squad; until then the counts are zero placeholders. */
     bool squadPopulationAvailable{};
-    /** The report counter went backwards or the spawn generation changed: a new registration. */
-    bool squadRegistrationReset{};
     /** Alive members the client published. Six bits on the wire, so 0 through 63. */
     std::int32_t squadAliveCount{};
     /** Alive count this observation replaced, for entityDied events. */
@@ -596,12 +594,10 @@ struct Event final {
     std::uint8_t squadSlotOrdinal{};
     /** Client flag written on its actor death or removal path. The meaning is unproved. */
     bool squadRemovalFlag{};
-    /** The removal flag was reported for this spawn lifetime. */
-    bool squadHasRemovalFlag{};
     /** Msg-6 record counter plus one; not a squad or actor lifetime identity. */
     std::uint32_t senseGenerationPlusOne{};
     bool hasSenseGeneration{};
-    /** A baseline report: it restates current levels and never proves a death. */
+    /** First report of this squad or object generation; it never proves a death. */
     bool initialObservation{};
     /** Authored entry index and spawn-mask words, for objectState events. */
     std::int32_t objectEntryIndex{};

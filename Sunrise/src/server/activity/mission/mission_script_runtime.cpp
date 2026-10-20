@@ -317,7 +317,6 @@ void clear_sense_levels(RuntimeInstance& instance) noexcept {
     instance.entityDamageObservations = {};
     instance.deviceObservations = {};
     instance.objectInteractionObservations = {};
-    instance.objectObservationHeldRegion = -1;
     instance.actorPathObservations = {};
     instance.sceneObservations = {};
     instance.objectiveObservations = {};

@@ -89,14 +89,23 @@ sense_value(std::span<const sense_values::DecodedValue> body,
     return event;
 }
 
+/** @return A squad edge carrying the squad's retained spawn generation. */
+[[nodiscard]] host::Event squad_edge_event(const RuntimeInstance& instance,
+                                           const host::SenseObservation& observation,
+                                           const SquadObservation& squad) noexcept {
+    host::Event event = sense_edge_event(instance, observation);
+    event.squadSpawnGeneration = squad.spawnGeneration;
+    event.squadHasSpawnGeneration = squad.hasSpawnGeneration;
+    return event;
+}
+
 /** @return The retained record for one squad, allocating on a first observation. */
 [[nodiscard]] SquadObservation* find_squad(RuntimeInstance& instance,
                                            const host::SenseObservationKey& key) noexcept {
     SquadObservation* spare = nullptr;
     for (SquadObservation& retained : instance.squadObservations) {
         if (retained.used && retained.registryKey == key.registryKey
-            && retained.objectTag == key.objectTag && retained.slotIndex == key.slotIndex
-            && retained.slotType == key.slotType && retained.schemaRow == key.schemaRow) {
+            && retained.objectTag == key.objectTag && retained.slotIndex == key.slotIndex) {
             return &retained;
         }
         if (!retained.used && spare == nullptr) {
@@ -123,8 +132,6 @@ sense_value(std::span<const sense_values::DecodedValue> body,
     spare->registryKey = key.registryKey;
     spare->objectTag = key.objectTag;
     spare->slotIndex = key.slotIndex;
-    spare->slotType = key.slotType;
-    spare->schemaRow = key.schemaRow;
     return spare;
 }
 
@@ -206,25 +213,58 @@ void objective_task_counters(std::span<const sense_values::DecodedValue> body,
     output.blocks = static_cast<std::uint8_t>((std::min)(blocks, output.value.size()));
 }
 
+/**
+ * Raises one triggerState event for a report its tracker does not drop. The event only informs;
+ * entered and exited follow the level alone.
+ * @param event The report's level, already filled in.
+ */
+void push_trigger_state(RuntimeInstance& instance,
+                        const host::SenseObservationSnapshot& sense,
+                        const host::SenseObservation& observation,
+                        TriggerOccupancy& slot,
+                        host::Event event) noexcept {
+    trigger_observation::Snapshot level{};
+    const bool valid =
+        observation.valueCount <= sense.valueCount - observation.firstValue
+        && trigger_observation::read(std::span(sense.values.data(), sense.valueCount)
+                                         .subspan(observation.firstValue, observation.valueCount),
+                                     level);
+    const auto result = slot.tracker.observe(valid ? &level : nullptr,
+                                             instance.view.activityClientGeneration,
+                                             observation.sourceGeneration,
+                                             observation.sequence,
+                                             observation.generationPlusOne,
+                                             observation.hasGeneration);
+    if (!result.notify) {
+        return;
+    }
+    event.kind = host::EventKind::triggerState;
+    event.triggerAvailable = result.available;
+    event.triggerContinuity = static_cast<std::uint8_t>(result.continuity);
+    push_script_event(instance, event);
+}
+
 } // namespace
 
 /**
- * Publishes qualified trigger levels and derives ordinary enter/exit edges from consecutive levels.
- * A first observation publishes a baseline state, because a first observation is not an entry.
+ * Raises one event per watched volume whose occupancy changed, after its triggerState report.
+ * The client publishes occupancy as a level, so the edge is ours to derive. A volume seen for the
+ * first time only records its level, because a first observation is not an entry.
  */
 void push_trigger_edges(RuntimeInstance& instance,
-                        const host::SenseObservationSnapshot& sense,
-                        std::uint64_t missionSequence) noexcept {
+                        const host::SenseObservationSnapshot& sense) noexcept {
+    namespace trigger = trigger_observation;
     for (std::size_t index = 0; index < sense.observationCount; ++index) {
         const host::SenseObservation& observation = sense.observations[index];
-        if (observation.key.slotType != trigger_observation::kSlotType
-            || observation.key.senseSchema != trigger_observation::kSchema
-            || observation.key.schemaRow != trigger_observation::kSchema
-            || observation.sourceGeneration == 0
-            || observation.sourceGeneration != instance.view.activityClientGeneration
-            || observation.sequence == 0) {
+        if (observation.key.slotType != format::kOccupancySlotType
+            || observation.valueCount < trigger::kValueCount
+            || observation.firstValue + trigger::kValueCount > sense.valueCount) {
             continue;
         }
+        const std::span<const sense_values::DecodedValue> body(
+            &sense.values[observation.firstValue], trigger::kValueCount);
+        const std::uint32_t root = observation.key.schemaRow;
+        const bool occupied = sense_flag(body, root, trigger::kOccupiedOrdinal);
         TriggerOccupancy* slot = nullptr;
         TriggerOccupancy* spare = nullptr;
         for (TriggerOccupancy& retained : instance.triggerOccupancy) {
@@ -238,7 +278,8 @@ void push_trigger_edges(RuntimeInstance& instance,
                 spare = &retained;
             }
         }
-        if (slot == nullptr) {
+        const bool first = slot == nullptr;
+        if (first) {
             if (spare == nullptr) {
                 log_line(core::log::Level::warn, &instance, "trigger", "watch_capacity");
                 continue;
@@ -247,42 +288,21 @@ void push_trigger_edges(RuntimeInstance& instance,
             slot->registryKey = observation.key.registryKey;
             slot->objectTag = observation.key.objectTag;
             slot->slotIndex = observation.key.slotIndex;
+            slot->occupied = occupied;
             slot->used = true;
         }
-        trigger_observation::Snapshot current{};
-        // An exact source with a malformed body must invalidate the prior baseline as well.
-        const bool bounded = observation.firstValue <= sense.valueCount
-                             && observation.valueCount <= sense.valueCount - observation.firstValue;
-        const bool valid = bounded
-                           && trigger_observation::read(
-                               std::span(sense.values.data(), sense.valueCount)
-                                   .subspan(observation.firstValue, observation.valueCount),
-                               current);
-        const auto result = slot->tracker.observe(valid ? &current : nullptr,
-                                                  instance.view.activityClientGeneration,
-                                                  observation.sourceGeneration,
-                                                  observation.sequence,
-                                                  observation.generationPlusOne,
-                                                  observation.hasGeneration);
-        if (!result.notify) {
+        host::Event event = sense_edge_event(instance, observation);
+        event.triggerOccupied = occupied;
+        event.triggerAll = sense_flag(body, root, trigger::kAllOrdinal);
+        event.triggerCount = sense_number(body, root, trigger::kCountOrdinal);
+        event.triggerValue = sense_number(body, root, trigger::kThresholdOrdinal);
+        push_trigger_state(instance, sense, observation, *slot, event);
+        if (first || slot->occupied == occupied) {
             continue;
         }
-        host::Event event = sense_edge_event(instance, observation);
-        event.missionSequence = missionSequence;
-        event.kind = host::EventKind::triggerState;
-        event.triggerAvailable = result.available;
-        event.triggerOccupied = current.occupied;
-        event.triggerContinuity = static_cast<std::uint8_t>(result.continuity);
-        event.triggerCount = current.count;
-        event.triggerValue = current.threshold;
-        event.triggerAll = current.all;
+        slot->occupied = occupied;
+        event.kind = occupied ? host::EventKind::triggerEntered : host::EventKind::triggerExited;
         push_script_event(instance, event);
-        if (result.edge != trigger_observation::Edge::none) {
-            event.kind = result.edge == trigger_observation::Edge::entered
-                             ? host::EventKind::triggerEntered
-                             : host::EventKind::triggerExited;
-            push_script_event(instance, event);
-        }
     }
 }
 
@@ -420,46 +440,6 @@ void push_damage_edges(RuntimeInstance& instance,
     }
 }
 
-/**
- * Finds the retained row for one interactable object, allocating a free row on a first
- * observation. At capacity the least recently observed row is recycled, so an object first seen
- * late in a mission still publishes its levels. The recycled row starts without history: its next
- * report publishes as a baseline and raises no interaction.
- */
-[[nodiscard]] ObjectInteractionObservation*
-find_object_row(RuntimeInstance& instance, const host::SenseObservation& observation) noexcept {
-    ObjectInteractionObservation* spare = nullptr;
-    ObjectInteractionObservation* oldest = nullptr;
-    for (ObjectInteractionObservation& retained : instance.objectInteractionObservations) {
-        if (retained.used && retained.registryKey == observation.key.registryKey
-            && retained.objectTag == observation.key.objectTag
-            && retained.slotIndex == observation.key.slotIndex) {
-            retained.sequence = observation.sequence;
-            return &retained;
-        }
-        if (!retained.used) {
-            if (spare == nullptr) {
-                spare = &retained;
-            }
-        } else if (oldest == nullptr || retained.sequence < oldest->sequence) {
-            oldest = &retained;
-        }
-    }
-    ObjectInteractionObservation* const row = spare != nullptr ? spare : oldest;
-    if (row == nullptr) {
-        return nullptr;
-    }
-    const bool recycled = spare == nullptr;
-    *row = {};
-    row->used = true;
-    row->interactionBaseline = recycled;
-    row->sequence = observation.sequence;
-    row->registryKey = observation.key.registryKey;
-    row->objectTag = observation.key.objectTag;
-    row->slotIndex = observation.key.slotIndex;
-    return row;
-}
-
 /** Raises object state and accepted interaction events per interactable object. */
 void push_object_interaction_edges(RuntimeInstance& instance,
                                    const host::SenseObservationSnapshot& sense) noexcept {
@@ -469,7 +449,8 @@ void push_object_interaction_edges(RuntimeInstance& instance,
                 observation, sense, format::kObjectSlotType, format::kObjectSenseSchema)) {
             continue;
         }
-        ObjectInteractionObservation* const slot = find_object_row(instance, observation);
+        ObjectInteractionObservation* const slot =
+            find_slot_row(instance.objectInteractionObservations, observation.key);
         if (slot == nullptr) {
             continue;
         }
@@ -494,8 +475,7 @@ void push_object_interaction_edges(RuntimeInstance& instance,
                 || before.present != level.present
                 || before.interactionOpen != level.interactionOpen
                 || before.ownerKnown != level.ownerKnown || before.hasOwner != level.hasOwner
-                || before.ownerKey != level.ownerKey || before.entryIndex != level.entryIndex
-                || before.spawnMask != level.spawnMask);
+                || before.ownerKey != level.ownerKey);
         if (stateChanged) {
             event.kind = host::EventKind::objectState;
             std::array<char, 128> details{};
@@ -519,11 +499,10 @@ void push_object_interaction_edges(RuntimeInstance& instance,
             }
             push_script_event(instance, event);
         }
-        if (interacted && !slot->interactionBaseline) {
+        if (interacted) {
             event.kind = host::EventKind::objectInteracted;
             push_script_event(instance, event);
         }
-        slot->interactionBaseline = false;
     }
 }
 
@@ -592,147 +571,49 @@ void push_squad_edges(RuntimeInstance& instance,
         if (squad == nullptr) {
             continue;
         }
-        if (observation.sourceGeneration == 0
-            || observation.sourceGeneration != instance.view.activityClientGeneration) {
-            continue;
-        }
-        const bool hadPrevious = squad->epoch.used;
-        const bool sameSource =
-            hadPrevious && squad->epoch.sourceGeneration == observation.sourceGeneration;
-        if (observation.sequence == 0
-            || (sameSource && observation.sequence <= squad->epoch.sequence)) {
-            continue;
-        }
-        const sense_values::DecodedValue* const generationValue =
-            sense_value(body, root, kSquadSpawnGenerationOrdinal);
-        const bool bodyHasGeneration = generationValue != nullptr && generationValue->present
-                                       && generationValue->signedValue >= 0
-                                       && generationValue->signedValue <= kMaximumCounter;
-        // A body naming a newer placement than the retained one is never a duplicate or replay.
-        const bool newerLifetime = bodyHasGeneration && squad->hasSpawnGeneration
-                                   && generationValue->signedValue > squad->spawnGeneration;
-        if (sameSource && squad->hasReportCounter && observation.hasGeneration
-            && observation.generationPlusOne == squad->reportCounter && !newerLifetime) {
-            continue;
-        }
-        // After a Sense rebase the client re-sends already delivered counters, often with a fuller
-        // delta against an older baseline. A replay repeats known state; treating it as a counter
-        // reset tells the scripts the squad lost its registration and spawn echo. A native
-        // re-registration restarts at one, or names a newer placement, and still reconciles below.
-        if (sameSource && squad->hasReportCounter && observation.hasGeneration
-            && observation.generationPlusOne > 1
-            && observation.generationPlusOne < squad->reportCounter && !newerLifetime) {
-            continue;
-        }
-        // Retained levels only bridge a proven consecutive report; after a gap, wrap or
-        // re-registration a field this body omits is unknown.
-        const bool consecutive = sameSource && squad->hasReportCounter && observation.hasGeneration
-                                 && squad->reportCounter != UINT32_MAX
-                                 && observation.generationPlusOne == squad->reportCounter + 1;
-        // A root-absent delta (a cost-only change, say) only continues the retained levels. After
-        // a gap it carries nothing to reconcile from, so it is ignored.
-        const bool rootPresent =
-            std::any_of(body.begin(), body.end(), [root](const sense_values::DecodedValue& value) {
-                return value.schemaRow == root;
-            });
-        if (!rootPresent && !consecutive) {
-            continue;
-        }
-
-        std::int32_t spawnGeneration =
-            bodyHasGeneration ? static_cast<std::int32_t>(generationValue->signedValue) : 0;
-        bool hasSpawnGeneration = bodyHasGeneration;
-        if (!bodyHasGeneration && consecutive) {
-            spawnGeneration = squad->spawnGeneration;
-            hasSpawnGeneration = squad->hasSpawnGeneration;
-        }
-        const bool lifetimeChanged =
-            bodyHasGeneration
-            && (!squad->hasSpawnGeneration || squad->spawnGeneration != spawnGeneration);
-        const bool sameLifetime = consecutive && !lifetimeChanged;
-        // Costs are deltas, so they only carry over a consecutive report of the same lifetime. A
-        // reset counts as a change even when this body reports no cost.
-        const SquadObjectiveCosts priorCosts = squad->objectiveCosts;
-        if (!sameLifetime) {
-            squad->objectiveCosts = {};
-        }
-        static_cast<void>(update_squad_objective_costs(squad->objectiveCosts, body, root));
-        const bool costsChanged = squad->objectiveCosts != priorCosts;
-
-        std::int32_t alive = sameLifetime ? squad->aliveCount : 0;
-        bool hasAlive = read_squad_alive(body, root, alive);
-        if (!hasAlive && sameLifetime) {
-            hasAlive = squad->hasAlive;
-        }
-        const sense_values::DecodedValue* const removalValue =
-            sense_value(body, root, kSquadRemovalOrdinal);
-        bool hasRemoval = removalValue != nullptr && removalValue->present;
-        bool removal = hasRemoval && removalValue->unsignedValue != 0;
-        if (!hasRemoval && sameLifetime) {
-            removal = squad->removalFlag;
-            hasRemoval = squad->hasRemoval;
-        }
-        // A forward gap whose body names the retained spawn generation is still that lifetime: its
-        // reported population compares with the retained one, so a death in the gap is not lost.
-        const bool gapInLifetime =
-            !consecutive && sameSource && squad->hasReportCounter && observation.hasGeneration
-            && observation.generationPlusOne > squad->reportCounter && bodyHasGeneration
-            && squad->hasSpawnGeneration && squad->spawnGeneration == spawnGeneration;
-        // Created counts only rise within one lifetime, so a report proven to continue it keeps the
-        // retained counts it omits and compares new ones against them.
-        const bool countsContinue = squad->used && (sameLifetime || gapInLifetime);
-        auto counts = countsContinue ? squad->slotCounts : decltype(squad->slotCounts){};
-        auto countLength = countsContinue ? squad->slotCountLength : std::uint8_t{};
+        const bool costsChanged = update_squad_objective_costs(squad->objectiveCosts, body, root);
+        // Cost-only deltas retain combat counts; they must never manufacture a death.
+        std::int32_t alive = squad->aliveCount;
+        const bool hasAlive = read_squad_alive(body, root, alive);
+        const bool removal = sense_flag(body, root, kSquadRemovalOrdinal);
+        auto counts = squad->slotCounts;
+        auto countLength = squad->slotCountLength;
         std::array<std::int32_t, host::kSquadSlotCapacity> incomingCounts{};
         const auto incomingLength = read_squad_created_counts(body, incomingCounts);
         if (incomingLength != 0) {
             counts = incomingCounts;
             countLength = incomingLength;
         }
-
-        auto transition = observation_epoch::accept(squad->epoch,
-                                                    instance.view.activityClientGeneration,
-                                                    observation.sourceGeneration,
-                                                    observation.sequence,
-                                                    static_cast<std::uint32_t>(spawnGeneration),
-                                                    hasSpawnGeneration && spawnGeneration > 0);
-        const bool counterReset = hadPrevious && !consecutive && !gapInLifetime;
-        if (transition != observation_epoch::Transition::discard
-            && (counterReset || !squad->hasAlive || !hasAlive)) {
-            transition = observation_epoch::Transition::baseline;
-        }
-        if (transition == observation_epoch::Transition::discard) {
+        if (!hasAlive && !costsChanged && incomingLength == 0) {
             continue;
         }
-        squad->reportCounter = observation.generationPlusOne;
-        squad->hasReportCounter = observation.hasGeneration;
-
-        const bool first = transition == observation_epoch::Transition::baseline;
+        const bool first = !squad->used;
         squad->used = true;
-        const std::int32_t previousAlive = first ? alive : squad->aliveCount;
+        squad->populationKnown = squad->populationKnown || hasAlive;
+        // An absent spawn generation keeps the last one reported, like the other retained levels.
+        const sense_values::DecodedValue* const spawn =
+            sense_value(body, root, kSquadSpawnGenerationOrdinal);
+        if (spawn != nullptr && spawn->present && spawn->signedValue >= 0
+            && spawn->signedValue <= kMaximumCounter) {
+            squad->spawnGeneration = static_cast<std::int32_t>(spawn->signedValue);
+            squad->hasSpawnGeneration = true;
+        }
+        const std::int32_t previousAlive = first ? 0 : squad->aliveCount;
         const bool changed =
-            costsChanged || first || squad->aliveCount != alive || squad->hasAlive != hasAlive
-            || squad->removalFlag != removal || squad->hasRemoval != hasRemoval
-            || squad->spawnGeneration != spawnGeneration
-            || squad->hasSpawnGeneration != hasSpawnGeneration
+            costsChanged || first || squad->aliveCount != alive || squad->removalFlag != removal
             || squad->slotCountLength != countLength || squad->slotCounts != counts;
         if (!changed) {
             continue;
         }
-        host::Event state = sense_edge_event(instance, observation);
+        host::Event state = squad_edge_event(instance, observation, *squad);
         state.squadObjectiveCosts = squad->objectiveCosts.values;
         state.squadObjectiveCostMask = squad->objectiveCosts.known;
         state.squadObjectiveRevision = squad->objectiveCosts.revision;
         qualify_objective_costs(instance, state);
-        // Scripts compare these counts as integers; zero stands in when none was reported.
-        state.squadAliveCount = hasAlive ? alive : 0;
-        state.squadPopulationAvailable = hasAlive;
-        state.squadSpawnGeneration = spawnGeneration;
-        state.squadHasSpawnGeneration = hasSpawnGeneration;
-        state.squadRegistrationReset = counterReset || (hadPrevious && lifetimeChanged);
-        state.squadPreviousAliveCount = hasAlive ? previousAlive : 0;
+        state.squadAliveCount = alive;
+        state.squadPreviousAliveCount = previousAlive;
+        state.squadPopulationAvailable = squad->populationKnown;
         state.squadRemovalFlag = removal;
-        state.squadHasRemovalFlag = hasRemoval;
         state.squadSlotCounts = counts;
         state.squadSlotCountLength = countLength;
         state.initialObservation = first;
@@ -743,43 +624,31 @@ void push_squad_edges(RuntimeInstance& instance,
 
         for (std::uint8_t slot = 0; slot < countLength; ++slot) {
             const std::int32_t previous =
-                countsContinue && slot < squad->slotCountLength ? squad->slotCounts[slot] : 0;
+                !first && slot < squad->slotCountLength ? squad->slotCounts[slot] : 0;
             if (counts[slot] <= previous) {
                 continue;
             }
-            host::Event spawned = sense_edge_event(instance, observation);
+            host::Event spawned = squad_edge_event(instance, observation, *squad);
             spawned.squadSlotOrdinal = slot;
             spawned.squadSlotValue = counts[slot];
             spawned.squadPreviousSlotValue = previous;
-            spawned.squadSpawnGeneration = spawnGeneration;
-            spawned.squadHasSpawnGeneration = hasSpawnGeneration;
             spawned.kind = host::EventKind::entitySpawned;
             if (instance.programStatus == ProgramStatus::loaded) {
                 push_script_event(instance, spawned);
             }
         }
-        // Only reports of one spawn lifetime, consecutive or across a gap the body confirms, may
-        // prove a population decrease.
-        if (!first && hasAlive && squad->hasAlive && alive < squad->aliveCount) {
-            host::Event died = sense_edge_event(instance, observation);
+        if (!first && alive < squad->aliveCount) {
+            host::Event died = squad_edge_event(instance, observation, *squad);
             died.squadAliveCount = alive;
-            died.squadPopulationAvailable = true;
-            died.squadSpawnGeneration = spawnGeneration;
-            died.squadHasSpawnGeneration = hasSpawnGeneration;
             died.squadPreviousAliveCount = squad->aliveCount;
             died.squadRemovalFlag = removal;
-            died.squadHasRemovalFlag = hasRemoval;
             died.kind = host::EventKind::entityDied;
             if (instance.programStatus == ProgramStatus::loaded) {
                 push_script_event(instance, died);
             }
         }
         squad->aliveCount = alive;
-        squad->hasAlive = hasAlive;
         squad->removalFlag = removal;
-        squad->hasRemoval = hasRemoval;
-        squad->spawnGeneration = spawnGeneration;
-        squad->hasSpawnGeneration = hasSpawnGeneration;
         squad->slotCounts = counts;
         squad->slotCountLength = countLength;
     }

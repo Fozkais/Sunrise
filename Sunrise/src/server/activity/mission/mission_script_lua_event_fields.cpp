@@ -382,13 +382,8 @@ constexpr EventBinding kSquadState[]{
          }
      }},
     {"initial_observation", nullptr, &boolean_field<&E::initialObservation>},
-    {"registration_reset", nullptr, &boolean_field<&E::squadRegistrationReset>},
     {"population_available", nullptr, &boolean_field<&E::squadPopulationAvailable>},
-    {"objective_revision",
-     nullptr,
-     [](lua_State* state, const E& event) {
-         lua_pushinteger(state, event.squadObjectiveRegistryKey != 0 ? 1 : 0);
-     }},
+    {"objective_revision", nullptr, &integer_field<&E::squadObjectiveRevision>},
     {"task_costs",
      nullptr,
      [](lua_State* state, const E& event) {
@@ -520,11 +515,7 @@ constexpr EventBinding kSenseGeneration[]{
      &present_integer<&E::senseGenerationPlusOne, &E::hasSenseGeneration>},
 };
 constexpr EventBinding kSquadRemoval[]{
-    {"removal_flag",
-     nullptr,
-     [](lua_State* state, const E& event) {
-         lua_pushboolean(state, event.squadHasRemovalFlag && event.squadRemovalFlag ? 1 : 0);
-     }},
+    {"removal_flag", nullptr, &boolean_field<&E::squadRemovalFlag>},
 };
 // An invalidation carries no level, so its level fields read nil.
 constexpr EventBinding kTriggerLevel[]{

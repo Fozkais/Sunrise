@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <span>
@@ -12,7 +13,15 @@ namespace sunrise::server::activity::mission::trigger_observation {
 namespace sense = middleware::bap::activity_message::sense_update;
 /** Type-30 occupancy Sense: two required flags, then two required signed 32-bit values. */
 constexpr std::uint32_t kSchema = 0x80809531U;
-constexpr std::uint8_t kSlotType = 30;
+constexpr std::size_t kValueCount = 4;
+/** Root ordinals: any member inside, all inside, intersection count, copied Auth value. */
+constexpr std::uint16_t kOccupiedOrdinal = 0;
+constexpr std::uint16_t kAllOrdinal = 1;
+constexpr std::uint16_t kCountOrdinal = 2;
+constexpr std::uint16_t kThresholdOrdinal = 3;
+/** The two flags are one bit wide and the two numbers 32. */
+constexpr std::uint8_t kFlagWidth = 1;
+constexpr std::uint8_t kNumberWidth = 32;
 
 /** One complete occupancy report. */
 struct Snapshot final {
@@ -20,40 +29,40 @@ struct Snapshot final {
     bool all{};
     std::int32_t count{};
     std::int32_t threshold{};
+    bool operator==(const Snapshot&) const = default;
 };
 
 /** Reads one occupancy body. An incomplete or ambiguous body is refused, never defaulted. */
 [[nodiscard]] inline bool read(std::span<const sense::DecodedValue> body,
                                Snapshot& output) noexcept {
-    if (body.size() != 4) {
+    if (body.size() != kValueCount) {
         return false;
     }
-    std::array<const sense::DecodedValue*, 4> fields{};
+    std::array<const sense::DecodedValue*, kValueCount> fields{};
     for (const auto& value : body) {
         if (value.schemaRow != kSchema || value.fieldOrdinal >= fields.size()
             || value.occurrence != 0 || !value.present || fields[value.fieldOrdinal]) {
             return false;
         }
-        if (value.fieldOrdinal < 2) {
-            if (value.kind != sense::ValueKind::boolean || value.width != 1
+        if (value.fieldOrdinal < kCountOrdinal) {
+            if (value.kind != sense::ValueKind::boolean || value.width != kFlagWidth
                 || value.unsignedValue > 1) {
                 return false;
             }
-        } else if (value.kind != sense::ValueKind::signedInteger || value.width != 32
+        } else if (value.kind != sense::ValueKind::signedInteger || value.width != kNumberWidth
                    || value.signedValue < (std::numeric_limits<std::int32_t>::min)()
                    || value.signedValue > (std::numeric_limits<std::int32_t>::max)()) {
             return false;
         }
         fields[value.fieldOrdinal] = &value;
     }
-    output = {fields[0]->unsignedValue != 0,
-              fields[1]->unsignedValue != 0,
-              static_cast<std::int32_t>(fields[2]->signedValue),
-              static_cast<std::int32_t>(fields[3]->signedValue)};
+    output = {fields[kOccupiedOrdinal]->unsignedValue != 0,
+              fields[kAllOrdinal]->unsignedValue != 0,
+              static_cast<std::int32_t>(fields[kCountOrdinal]->signedValue),
+              static_cast<std::int32_t>(fields[kThresholdOrdinal]->signedValue)};
     return true;
 }
 
-enum class Edge : std::uint8_t { none, entered, exited };
 /** How one report relates to the last accepted one, as scripts see it. */
 enum class Continuity : std::uint8_t {
     invalid,
@@ -89,9 +98,8 @@ enum class Continuity : std::uint8_t {
         return "invalid";
     }
 }
-/** What one report means: an optional edge, its continuity, and whether scripts hear of it. */
+/** What one report means to scripts: its continuity, and whether they hear of it. */
 struct Observation final {
-    Edge edge{Edge::none};
     Continuity continuity{Continuity::invalid};
     /** Scripts receive a triggerState event for this report. */
     bool notify{};
@@ -100,19 +108,20 @@ struct Observation final {
 };
 
 /**
- * Tracks one volume's reports. Only consecutive record counters from one source prove an edge; a
- * repeated counter never confirms a level, and a conflicting repeat invalidates it.
+ * Classifies one volume's reports by their record counter. It never decides an enter or exit edge;
+ * a repeated counter never confirms a level, and a conflicting repeat invalidates it.
  */
 struct Tracker final {
     std::uint64_t source{}, sequence{};
     std::uint32_t counter{};
-    bool hasCounter{}, known{}, occupied{};
+    bool hasCounter{}, known{};
     Snapshot snapshot{};
-    void invalidate_levels() noexcept {
-        known = false;
-    }
 
-    /** @param current The decoded level, or null when the body was malformed. */
+    /**
+     * Classifies one report against the last accepted one.
+     * @param current The decoded level, or null when the body was malformed.
+     * @return Nothing to notify for a stale or foreign report or an exact duplicate.
+     */
     [[nodiscard]] Observation observe(const Snapshot* current,
                                       std::uint64_t expectedSource,
                                       std::uint64_t nextSource,
@@ -124,46 +133,32 @@ struct Tracker final {
             return {};
         }
         const bool sameSource = source == nextSource;
-        if (!current) {
-            source = nextSource;
-            sequence = nextSequence;
-            known = false;
-            hasCounter = false;
-            return {Edge::none, Continuity::invalid, true, false};
-        }
-        if (sameSource && hasCounter && nextHasCounter && counter == nextCounter) {
-            const bool same = snapshot.occupied == current->occupied && snapshot.all == current->all
-                              && snapshot.count == current->count
-                              && snapshot.threshold == current->threshold;
-            if (!same) {
-                invalidate_levels();
-            }
-            sequence = nextSequence;
-            return {Edge::none, same ? Continuity::duplicate : Continuity::conflict, !same, false};
-        }
-        Continuity continuity = Continuity::baseline;
-        const bool consecutive = known && sameSource && hasCounter && nextHasCounter
-                                 && counter != UINT32_MAX && nextCounter == counter + 1;
-        if (!nextHasCounter) {
-            continuity = Continuity::missingCounter;
-        } else if (consecutive) {
-            continuity = Continuity::consecutive;
-        } else if (sameSource && hasCounter && known) {
-            continuity = counter == UINT32_MAX   ? Continuity::wrap
-                         : nextCounter < counter ? Continuity::reset
-                                                 : Continuity::gap;
-        }
-        const Edge edge = !consecutive || occupied == current->occupied ? Edge::none
-                          : current->occupied                           ? Edge::entered
-                                                                        : Edge::exited;
         source = nextSource;
         sequence = nextSequence;
+        if (current == nullptr) {
+            known = false;
+            hasCounter = false;
+            return {Continuity::invalid, true, false};
+        }
+        if (sameSource && hasCounter && nextHasCounter && counter == nextCounter) {
+            const bool same = snapshot == *current;
+            known = known && same;
+            return {same ? Continuity::duplicate : Continuity::conflict, !same, false};
+        }
+        Continuity continuity = Continuity::baseline;
+        if (!nextHasCounter) {
+            continuity = Continuity::missingCounter;
+        } else if (known && sameSource && hasCounter) {
+            continuity = counter == (std::numeric_limits<std::uint32_t>::max)() ? Continuity::wrap
+                         : nextCounter == counter + 1 ? Continuity::consecutive
+                         : nextCounter < counter      ? Continuity::reset
+                                                      : Continuity::gap;
+        }
         counter = nextCounter;
         hasCounter = nextHasCounter;
         known = nextHasCounter;
-        occupied = current->occupied;
         snapshot = *current;
-        return {edge, continuity, true, nextHasCounter};
+        return {continuity, true, nextHasCounter};
     }
 };
 
