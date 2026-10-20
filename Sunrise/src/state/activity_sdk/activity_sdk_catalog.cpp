@@ -39,6 +39,31 @@ template <typename Parent, typename Child>
     return values.subspan(first, count);
 }
 
+/** Returns the contiguous rows whose projected key equals `key`; rows are sorted by that key. */
+template <typename Row, typename Key, typename Project>
+[[nodiscard]] std::span<const Row>
+key_rows(std::span<const Row> values, const Key& key, Project project) noexcept {
+    const auto first = std::partition_point(
+        values.begin(), values.end(), [&](const Row& row) { return project(row) < key; });
+    const auto last = std::partition_point(
+        first, values.end(), [&](const Row& row) { return !(key < project(row)); });
+    return values.subspan(static_cast<std::size_t>(first - values.begin()),
+                          static_cast<std::size_t>(last - first));
+}
+
+/** Returns the rows keyed by one slot of this catalog, or none for a foreign slot. */
+template <typename Row, typename Project>
+[[nodiscard]] std::span<const Row> slot_rows(const Catalog& catalog,
+                                             const format::Slot& slot,
+                                             std::span<const Row> values,
+                                             Project project) noexcept {
+    const auto slots = catalog.slots();
+    if (!owns(slots, slot)) {
+        return {};
+    }
+    return key_rows(values, static_cast<std::uint32_t>(&slot - slots.data()), project);
+}
+
 } // namespace
 
 /** Releases the mapped view after the last immutable snapshot owner leaves. */
@@ -558,18 +583,10 @@ std::span<const format::Squad> scenario_squads(const Catalog& catalog,
     if (!owns(scenarios, scenario)) {
         return {};
     }
-    const auto values = catalog.squads();
     const std::uint32_t scenarioIndex = static_cast<std::uint32_t>(&scenario - scenarios.data());
-    const auto first = std::lower_bound(
-        values.begin(), values.end(), scenarioIndex, [](const format::Squad& row, auto index) {
-            return row.scenarioIndex < index;
-        });
-    const auto last = std::upper_bound(
-        first, values.end(), scenarioIndex, [](auto index, const format::Squad& row) {
-            return index < row.scenarioIndex;
-        });
-    const std::size_t offset = static_cast<std::size_t>(first - values.begin());
-    return values.subspan(offset, static_cast<std::size_t>(last - first));
+    return key_rows(catalog.squads(), scenarioIndex, [](const format::Squad& row) {
+        return row.scenarioIndex;
+    });
 }
 
 std::span<const format::State> bubble_states(const Catalog& catalog,
@@ -778,22 +795,8 @@ std::span<const format::SquadAnchor> squad_anchors(const Catalog& catalog,
 /** Relies on slot then cue ordering to return one contiguous zero-copy cue range. */
 std::span<const format::DialogueCue> slot_dialogue_cues(const Catalog& catalog,
                                                         const format::Slot& slot) noexcept {
-    const auto slots = catalog.slots();
-    if (!owns(slots, slot)) {
-        return {};
-    }
-    const auto values = catalog.dialogue_cues();
-    const std::uint32_t slotIndex = static_cast<std::uint32_t>(&slot - slots.data());
-    const auto first =
-        std::lower_bound(values.begin(), values.end(), slotIndex, [](const auto& row, auto index) {
-            return row.slotIndex < index;
-        });
-    const auto last =
-        std::upper_bound(first, values.end(), slotIndex, [](auto index, const auto& row) {
-            return index < row.slotIndex;
-        });
-    return values.subspan(static_cast<std::size_t>(first - values.begin()),
-                          static_cast<std::size_t>(last - first));
+    return slot_rows(
+        catalog, slot, catalog.dialogue_cues(), [](const auto& row) { return row.slotIndex; });
 }
 
 /** Relies on slot, cue, line then take ordering to return one contiguous zero-copy line range. */
@@ -804,18 +807,10 @@ std::span<const format::DialogueCueText> cue_dialogue_texts(const Catalog& catal
     if (!owns(slots, slot)) {
         return {};
     }
-    const auto values = catalog.dialogue_cue_texts();
     const auto key = std::make_pair(static_cast<std::uint32_t>(&slot - slots.data()), cueIndex);
-    const auto first =
-        std::lower_bound(values.begin(), values.end(), key, [](const auto& row, const auto& cue) {
-            return std::make_pair(row.slotIndex, row.cueIndex) < cue;
-        });
-    const auto last =
-        std::upper_bound(first, values.end(), key, [](const auto& cue, const auto& row) {
-            return cue < std::make_pair(row.slotIndex, row.cueIndex);
-        });
-    return values.subspan(static_cast<std::size_t>(first - values.begin()),
-                          static_cast<std::size_t>(last - first));
+    return key_rows(catalog.dialogue_cue_texts(), key, [](const auto& row) {
+        return std::make_pair(row.slotIndex, row.cueIndex);
+    });
 }
 
 std::uint32_t authored_milliseconds(float seconds) noexcept {
@@ -831,64 +826,24 @@ std::uint32_t authored_milliseconds(float seconds) noexcept {
 /** Relies on slot-index ordering to return one contiguous zero-copy resource range. */
 std::span<const format::AuthoredSceneResource>
 slot_authored_scene_resources(const Catalog& catalog, const format::Slot& slot) noexcept {
-    const auto slots = catalog.slots();
-    if (!owns(slots, slot)) {
-        return {};
-    }
-    const auto values = catalog.authored_scene_resources();
-    const std::uint32_t slotIndex = static_cast<std::uint32_t>(&slot - slots.data());
-    const auto first =
-        std::lower_bound(values.begin(), values.end(), slotIndex, [](const auto& row, auto index) {
-            return row.slotIndex < index;
-        });
-    const auto last =
-        std::upper_bound(first, values.end(), slotIndex, [](auto index, const auto& row) {
-            return index < row.slotIndex;
-        });
-    return values.subspan(static_cast<std::size_t>(first - values.begin()),
-                          static_cast<std::size_t>(last - first));
+    return slot_rows(catalog, slot, catalog.authored_scene_resources(), [](const auto& row) {
+        return row.slotIndex;
+    });
 }
 
 /** Relies on slot ordering to return one contiguous zero-copy element range. */
 std::span<const format::DirectiveElement>
 slot_directive_elements(const Catalog& catalog, const format::Slot& slot) noexcept {
-    const auto slots = catalog.slots();
-    if (!owns(slots, slot)) {
-        return {};
-    }
-    const auto values = catalog.directive_elements();
-    const std::uint32_t slotIndex = static_cast<std::uint32_t>(&slot - slots.data());
-    const auto first =
-        std::lower_bound(values.begin(), values.end(), slotIndex, [](const auto& row, auto index) {
-            return row.slotIndex < index;
-        });
-    const auto last =
-        std::upper_bound(first, values.end(), slotIndex, [](auto index, const auto& row) {
-            return index < row.slotIndex;
-        });
-    return values.subspan(static_cast<std::size_t>(first - values.begin()),
-                          static_cast<std::size_t>(last - first));
+    return slot_rows(
+        catalog, slot, catalog.directive_elements(), [](const auto& row) { return row.slotIndex; });
 }
 
 /** Relies on scene-slot ordering to return one contiguous zero-copy edge range. */
 std::span<const format::AuthoredSceneSquadEdge>
 slot_authored_scene_squad_edges(const Catalog& catalog, const format::Slot& slot) noexcept {
-    const auto slots = catalog.slots();
-    if (!owns(slots, slot)) {
-        return {};
-    }
-    const auto values = catalog.authored_scene_squad_edges();
-    const std::uint32_t slotIndex = static_cast<std::uint32_t>(&slot - slots.data());
-    const auto first =
-        std::lower_bound(values.begin(), values.end(), slotIndex, [](const auto& row, auto index) {
-            return row.sceneSlotIndex < index;
-        });
-    const auto last =
-        std::upper_bound(first, values.end(), slotIndex, [](auto index, const auto& row) {
-            return index < row.sceneSlotIndex;
-        });
-    return values.subspan(static_cast<std::size_t>(first - values.begin()),
-                          static_cast<std::size_t>(last - first));
+    return slot_rows(catalog, slot, catalog.authored_scene_squad_edges(), [](const auto& row) {
+        return row.sceneSlotIndex;
+    });
 }
 
 const format::Slot*
@@ -904,17 +859,9 @@ authored_scene_linked_squad_slot(const Catalog& catalog,
 /** Relies on actor-class ordering to return one contiguous zero-copy state-name range. */
 std::span<const format::ActorStateName>
 actor_class_state_names(const Catalog& catalog, std::uint32_t actorClassIndex) noexcept {
-    const auto values = catalog.actor_state_names();
-    const auto first = std::lower_bound(
-        values.begin(), values.end(), actorClassIndex, [](const auto& row, auto index) {
-            return row.actorClassIndex < index;
-        });
-    const auto last =
-        std::upper_bound(first, values.end(), actorClassIndex, [](auto index, const auto& row) {
-            return index < row.actorClassIndex;
-        });
-    return values.subspan(static_cast<std::size_t>(first - values.begin()),
-                          static_cast<std::size_t>(last - first));
+    return key_rows(catalog.actor_state_names(), actorClassIndex, [](const auto& row) {
+        return row.actorClassIndex;
+    });
 }
 
 /** Copies one performance slot's state name hashes. @return How many were written. */
@@ -973,22 +920,8 @@ std::size_t performance_state_names(const Catalog& catalog,
 /** Relies on task-slot ordering to return one contiguous zero-copy target range. */
 std::span<const format::TaskTarget> slot_task_targets(const Catalog& catalog,
                                                       const format::Slot& slot) noexcept {
-    const auto slots = catalog.slots();
-    if (!owns(slots, slot)) {
-        return {};
-    }
-    const auto values = catalog.task_targets();
-    const std::uint32_t slotIndex = static_cast<std::uint32_t>(&slot - slots.data());
-    const auto first =
-        std::lower_bound(values.begin(), values.end(), slotIndex, [](const auto& row, auto index) {
-            return row.taskSlotIndex < index;
-        });
-    const auto last =
-        std::upper_bound(first, values.end(), slotIndex, [](auto index, const auto& row) {
-            return index < row.taskSlotIndex;
-        });
-    return values.subspan(static_cast<std::size_t>(first - values.begin()),
-                          static_cast<std::size_t>(last - first));
+    return slot_rows(
+        catalog, slot, catalog.task_targets(), [](const auto& row) { return row.taskSlotIndex; });
 }
 
 /** @return The objective slot one task target names, or null when it names none. */
