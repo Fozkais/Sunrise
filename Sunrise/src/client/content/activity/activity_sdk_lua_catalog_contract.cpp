@@ -417,12 +417,15 @@ append_raw_field(Value::Object& fields, std::string_view code, std::string_view 
 
 /** Ledger entry for the strings section; the view field appears only in the projection ledger. */
 [[nodiscard]] Value strings_projection(bool includeView) {
+    std::string surface("context.sdk.catalog.<all ");
+    surface.append(std::to_string(kDecodedStringFieldCount));
+    surface.append(" StringRef value/offset/length fields>");
     Value::Object fields{
         {"projection_mode", string("authenticated_parent_bounded_string_refs")},
         {"section", string("strings")},
         {"section_index", number(0)},
         {"source_artifact", string("activity_sdk.runtime_pack")},
-        {"surface", string("context.sdk.catalog.<all 54 StringRef value/offset/length fields>")},
+        {"surface", string(surface)},
     };
     if (includeView) {
         fields.push_back({"view", string("decoded_utf8_string_or_nil_with_raw_StringRef")});
