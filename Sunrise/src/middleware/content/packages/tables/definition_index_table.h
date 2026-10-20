@@ -335,6 +335,8 @@ slot_tag(std::span<const std::byte> blob, std::size_t index, std::uint32_t& tag)
 
 /** The investment root holds the item index table at this slot. */
 inline constexpr std::size_t kItemTableSlot = 48;
+/** The investment root holds the new-character table, one row of items per class, here. */
+inline constexpr std::size_t kStarterSetTableSlot = 15;
 /** The investment root holds the shared reusable/randomized plug-set table at this slot. */
 inline constexpr std::size_t kPlugSetTableSlot = 51;
 /** The investment root holds the dense ordinary socket-type table at this slot. */

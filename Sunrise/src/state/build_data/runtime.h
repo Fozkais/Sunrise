@@ -30,6 +30,7 @@
 #include "socket_entry_buckets/definition.h"
 #include "socket_entry_lists/definition.h"
 #include "spawn_sets/definition.h"
+#include "starter_sets/definition.h"
 #include "vendors/definition.h"
 
 namespace sunrise::state::build_data::items::catalysts {
@@ -580,6 +581,26 @@ publish_investment_constants(const constants::InvestmentConstants& value) noexce
  * @return True when the constants are in State.
  */
 [[nodiscard]] bool find_investment_constants(constants::InvestmentConstants& value) noexcept;
+
+/** @return True once the new-character table, empty or not, is in State. */
+[[nodiscard]] bool starter_sets_ready() noexcept;
+
+/**
+ * Publishes the new-character table. It is read every boot and never joins the disk cache.
+ * @param definitions One row per class; empty when the installed table did not read.
+ * @return True when every row names a distinct playable class and fits its storage.
+ */
+[[nodiscard]] bool
+publish_starter_sets(std::span<const starter_sets::Definition> definitions) noexcept;
+
+/**
+ * Finds the items the packages give a new character of one class.
+ * @param characterClass Class byte: 0 Titan, 1 Hunter, 2 Warlock.
+ * @param definition Receives the class row.
+ * @return True when the published table holds that class.
+ */
+[[nodiscard]] bool find_starter_set(std::uint8_t characterClass,
+                                    starter_sets::Definition& definition) noexcept;
 
 /** @return True when the whole inventory-bucket descriptor table is in State. */
 [[nodiscard]] bool inventory_bucket_descriptors_ready() noexcept;

@@ -483,6 +483,28 @@ void publish_sign_in_time(std::uint64_t seconds) noexcept;
 [[nodiscard]] bool set_selected_character(std::uint64_t characterSoid) noexcept;
 
 /**
+ * Adds an unselected character to a free slot with its starter set and saves the account.
+ * @param characterClass Character class: 0 Titan, 1 Hunter, 2 Warlock.
+ * @param gender Character gender: 0 male, 1 female.
+ * @param race Character race: 0 human, 1 awoken, 2 exo.
+ * @param appearanceHeader Appearance header from the request, in record byte order.
+ * @param characterSoid Receives the new character's id, zero on failure.
+ * @return False when nothing was saved.
+ */
+[[nodiscard]] bool create_character(std::uint8_t characterClass,
+                                    std::uint8_t gender,
+                                    std::uint8_t race,
+                                    const AppearanceHeader& appearanceHeader,
+                                    std::uint64_t& characterSoid) noexcept;
+
+/**
+ * Removes one character with its items and slot-keyed rows and saves the account.
+ * @param characterSoid Id of the character to remove.
+ * @return False when nothing was saved.
+ */
+[[nodiscard]] bool delete_character(std::uint64_t characterSoid) noexcept;
+
+/**
  * Stores the selected character's equipped title row. The caller proves the record is a claimed
  * title; this only writes it.
  * @param recordIndex Title record row, or kUnequippedTitleRecordIndex to clear it.

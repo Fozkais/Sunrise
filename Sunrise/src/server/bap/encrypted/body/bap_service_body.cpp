@@ -18,6 +18,7 @@
 #include "../../../gameplay/group/group_host_sessions.h"
 #include "../../../web_service/opcode_routes.h"
 #include "../../../web_service/web_service_runtime.h"
+#include "../../runtime.h"
 #include "../activity_host_manager/activity_host_manager_route.h"
 #include "../activity_message/activity_message_route.h"
 #include "../internal.h"
@@ -233,6 +234,24 @@ bool process(const ServiceRoute& route,
                 }
             }
             sunrise::server::bap::arm_account_resync_everywhere();
+        }
+        if (webOutcome.hasRosterChange) {
+            // Name the revision the account resync below publishes; it carries the new roster.
+            if (queuezState.family4Active
+                && queuezState.family4Version != (std::numeric_limits<std::int32_t>::max)()
+                && !sunrise::server::web_service::encode_roster_reply(
+                    message, queuezState.family4Version + 1, webOutcome, output, written)) {
+                core::log::write(core::log::Channel::server,
+                                 core::log::Level::warn,
+                                 "ev=roster stage=response result=fail");
+                // Returning before the commit drops the change with this transaction.
+                return false;
+            }
+            sunrise::server::bap::arm_account_resync_everywhere();
+            if (webOutcome.createdCharacterSoid != 0) {
+                // One more refresh slice builds the ability rows of the new character's subclass.
+                sunrise::server::bap::request_investment_slice();
+            }
         }
         outcome.hasSubscription = webOutcome.hasSubscription;
         outcome.hasRecordClaim = webOutcome.hasRecordClaim;

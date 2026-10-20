@@ -40,7 +40,8 @@ namespace {
            && state::build_data::record_definitions_ready()
            && state::build_data::node_definitions_ready()
            && state::build_data::sobject_definitions_ready()
-           && state::build_data::investment_constants_ready() && exotic_catalysts_settled();
+           && state::build_data::investment_constants_ready()
+           && state::build_data::starter_sets_ready() && exotic_catalysts_settled();
 }
 
 } // namespace
@@ -227,6 +228,12 @@ bool build() noexcept {
                                               extracted)) {
                     (void)state::build_data::publish_investment_constants(extracted);
                 }
+            }
+            if (!state::build_data::starter_sets_ready()) {
+                (void)build_starter_sets(source,
+                                         storage.scratch,
+                                         std::span<const std::byte>{storage.root},
+                                         storage.child);
             }
             reason = "slot";
             if (!tables::slot_tag(
