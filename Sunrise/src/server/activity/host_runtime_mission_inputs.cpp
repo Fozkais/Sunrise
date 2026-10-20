@@ -18,17 +18,21 @@
 #include "host_runtime_internal.h"
 
 namespace sunrise::server::activity::host {
-namespace detail {
-
-/** The feed is unbounded; it holds every accepted row until its program commits it. */
-std::vector<MissionInputRecord> g_missionInputs{};
-
-} // namespace detail
-
 namespace {
 
 using namespace detail;
 
+/** One accepted client input with the exact values its program will read. */
+struct MissionInputRecord final {
+    MissionInputEvent view{};
+    middleware::bap::activity_message::sense_update::DecodedPacket sense{};
+    ClientMessageSnapshot clientMessage{};
+    bool hasSense{};
+    bool hasClientMessage{};
+};
+
+/** The feed is unbounded; it holds every accepted row until its program commits it. */
+std::vector<MissionInputRecord> g_missionInputs{};
 std::uint64_t g_missionInputSequence{};
 
 /** @return True when this event kind enters the ordered mission-input feed. */
@@ -229,17 +233,7 @@ bool mission_input_sense_snapshot(std::uint64_t sequence,
     if (copied) {
         const Event& event = selected->view.event;
         const sense::DecodedPacket& packet = selected->sense;
-        copied =
-            usable_sense_observation_packet({.sourceGeneration = event.sourceGeneration,
-                                             .clientMessageSequence = event.clientMessageSequence,
-                                             .verdict = event.verdict,
-                                             .decodeStatus = event.senseDecodeStatus,
-                                             .groupsSeen = event.groupsSeen,
-                                             .groupsDecoded = event.groupsDecoded,
-                                             .groupsSkipped = event.groupsSkipped,
-                                             .objectsSeen = event.objectsSeen,
-                                             .objectsDecoded = event.objectsDecoded},
-                                            packet);
+        copied = sense::observation_packet(packet);
         if (copied) {
             output.revision = event.sequence;
             output.sourceGeneration = event.sourceGeneration;

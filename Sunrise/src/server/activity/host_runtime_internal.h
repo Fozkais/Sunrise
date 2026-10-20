@@ -312,36 +312,6 @@ void reset_client_messages() noexcept;
 
 // The mission-input unit owns these. Every reducer that accepts a client input calls into them.
 
-/** One accepted client input with the exact values its program will read. */
-struct MissionInputRecord final {
-    MissionInputEvent view{};
-    middleware::bap::activity_message::sense_update::DecodedPacket sense{};
-    ClientMessageSnapshot clientMessage{};
-    bool hasSense{};
-    bool hasClientMessage{};
-};
-
-/** What one msg-6 receipt claimed about its packet, as retained beside the decoded values. */
-struct SenseEnvelope final {
-    std::uint64_t sourceGeneration{};
-    std::uint64_t clientMessageSequence{};
-    state::activity::receipts::Verdict verdict{};
-    middleware::bap::activity_message::sense_update::DecodeStatus decodeStatus{};
-    std::uint32_t groupsSeen{};
-    std::uint32_t groupsDecoded{};
-    std::uint32_t groupsSkipped{};
-    std::uint32_t objectsSeen{};
-    std::uint32_t objectsDecoded{};
-};
-
-/** @return True when every exposed object is complete inside one safely framed packet. */
-[[nodiscard]] bool usable_sense_observation_packet(
-    const SenseEnvelope& envelope,
-    const middleware::bap::activity_message::sense_update::DecodedPacket& packet) noexcept;
-
-/** Accepted rows in feed order; the Host lock guards it. */
-extern std::vector<MissionInputRecord> g_missionInputs;
-
 /** Assigns one exact binding's ordered client mission-input sequence. */
 void stamp_mission_sequence(Event& event) noexcept;
 
