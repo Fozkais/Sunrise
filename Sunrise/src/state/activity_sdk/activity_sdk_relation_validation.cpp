@@ -117,7 +117,8 @@ constexpr std::uint32_t kAbilityTargetComponentClass = 0x80807D9BU;
     for (std::size_t index = 0; index < cues.size(); ++index) {
         const format::DialogueCue& row = cues[index];
         if (row.slotIndex >= slots.size() || (row.flags & ~format::kDialogueCueFlagMask) != 0
-            || row.reserved != 0 || row.definitionHash == 0 || row.definitionHash == 0x811C9DC5U
+            || row.reserved != 0 || row.definitionHash == 0
+            || row.definitionHash == kAbsentDefinitionHash
             || !std::isfinite(row.authoredWindowSeconds) || row.authoredWindowSeconds < 0.0F
             || row.listTag == 0 || row.listTag == format::kAbsentIndex
             || (row.lineCount != 0 && (row.flags & format::kDialogueCueLinesExact) == 0)) {

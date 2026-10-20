@@ -5,15 +5,17 @@
 #include <cstring>
 #include <limits>
 
+#include "../../../state/activity_sdk/format.h"
 #include "activity_sdk_dialogue_group_index.h"
 
 namespace sunrise::client::content::activity::sdk_generation::dialogue_list {
 namespace {
 
+namespace format = state::activity_sdk::format;
+
 // The cue definitions come in cue order; the content trees that follow are sorted by hash.
 constexpr std::size_t kTreeField = 0x18;
 constexpr std::size_t kTreeStride = 16;
-constexpr std::uint32_t kTreeArrayClass = 0x80808D19U;
 // Every tree object repeats the definition hash it belongs to, after a per-object id.
 constexpr std::size_t kObjectHashOffset = 4;
 // A sequence plays its children in order through an array of relative object pointers.
@@ -207,7 +209,8 @@ bool read(std::span<const std::byte> list, Snapshot& output) {
     std::size_t treeRows = 0;
     std::size_t treeCount = 0;
     if (!dialogue_group_index::definitions(list, definitions)
-        || !read_array(list, kTreeField, kTreeStride, kTreeArrayClass, treeRows, treeCount)) {
+        || !read_array(
+            list, kTreeField, kTreeStride, format::kDialogueGroupArrayClass, treeRows, treeCount)) {
         return false;
     }
     std::vector<Tree> trees(treeCount);
