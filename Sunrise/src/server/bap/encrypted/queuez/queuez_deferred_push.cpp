@@ -445,7 +445,6 @@ selected_character(const state::AccountState& account) noexcept {
     auto nextSendNonce = session.sendNonce;
     std::size_t framedSize = 0;
     queuez::SessionState current = session.queuez;
-    bool wrote = false;
     if (current.family0Active) {
         queuez::SessionState appearanceAfter{};
         if (!push::append_account_resync_appearance_notification(scratch,
@@ -458,7 +457,6 @@ selected_character(const state::AccountState& account) noexcept {
             return false;
         }
         current = appearanceAfter;
-        wrote = true;
     }
     if (current.family3Active) {
         queuez::SessionState rosterAfter{};
@@ -474,9 +472,13 @@ selected_character(const state::AccountState& account) noexcept {
             return false;
         }
         current = rosterAfter;
-        wrote = true;
     }
-    if (!wrote || framedSize == 0 || framedSize > response.size() || !queuez::valid(current)) {
+    if (framedSize == 0 && queuez::valid(current)) {
+        // Both lanes appended nothing because nothing is picked, so no refresh is owed.
+        session.characterRefreshScope = CharacterRefreshScope::none;
+        return false;
+    }
+    if (framedSize == 0 || framedSize > response.size() || !queuez::valid(current)) {
         core::log::write(core::log::Channel::server,
                          core::log::Level::warn,
                          "ev=queuez stage=ability_refresh result=fail");
