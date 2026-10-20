@@ -192,7 +192,6 @@ bool consume_activity_keepalive(Session& session,
                                 std::span<std::byte> response,
                                 std::size_t& written,
                                 bool& touchesScratch) noexcept {
-    const state::activity_sdk::CatalogPublicationGuard catalogPublication;
     written = 0;
     const std::uint64_t now = GetTickCount64();
     const bool keepaliveDue = now >= session.activityKeepaliveDueTick;
@@ -363,7 +362,8 @@ bool consume_activity_keepalive(Session& session,
     // Held until the frame reaches the caller. Encoding alone does not spend the region trigger.
     std::int32_t stagedAdvertisedRegion = -1;
     bool stagedAdvertisedPrivate = false;
-    // Only a changed Host value, retirement or the arrival answer can publish a standalone roster.
+    // Only a changed Host value or mission state, retirement or the arrival answer can publish a
+    // standalone roster.
     if (!keepaliveDue && !regionChanged && !hostTeleportDue) {
         bool appendedRoster = false;
         if (hostStateDue || scriptableDue || retirementDue || arrivalDue || missionSeedDue) {
