@@ -139,9 +139,12 @@ inline constexpr std::uint32_t kDialogueGroupArrayClass = 0x80808D19U;
 inline constexpr std::uint32_t kDialogueMaximumCueCount = 128U;
 /** Every dialogue line holds two takes of the same text. */
 inline constexpr std::uint32_t kDialogueTakeCount = 2U;
-/** A cue row's lines were read from the one content tree matching its authored duration. */
+/** A cue row's lines were read from one content tree carrying its definition hash. */
 inline constexpr std::uint32_t kDialogueCueLinesExact = 0x1U;
-inline constexpr std::uint32_t kDialogueCueFlagMask = kDialogueCueLinesExact;
+/** That tree's length differs from the authored window; its lines are still kept. */
+inline constexpr std::uint32_t kDialogueCueWindowMismatch = 0x2U;
+inline constexpr std::uint32_t kDialogueCueFlagMask =
+    kDialogueCueLinesExact | kDialogueCueWindowMismatch;
 /** Inspect exposure is read-only and may be rendered by diagnostics. */
 inline constexpr std::uint32_t kInspectExposure = 0x1U;
 /** Panel-test exposure marks a candidate that still passes runtime gates. */

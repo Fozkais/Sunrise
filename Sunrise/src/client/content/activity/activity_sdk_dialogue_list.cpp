@@ -246,6 +246,7 @@ bool read(std::span<const std::byte> list, Snapshot& output) {
         std::size_t matches = 0;
         bool malformed = false;
         std::vector<Line> matched{};
+        std::vector<Line> unmatched{};
         for (auto tree = range.first; tree != range.second; ++tree) {
             Walk walk{};
             walk.definitionHash = cue.definitionHash;
@@ -257,6 +258,8 @@ bool read(std::span<const std::byte> list, Snapshot& output) {
             if (std::fabs(seconds - cue.seconds) <= kSecondsTolerance) {
                 ++matches;
                 matched = std::move(walk.lines);
+            } else {
+                unmatched = std::move(walk.lines);
             }
         }
         const std::size_t candidates = static_cast<std::size_t>(range.second - range.first);
@@ -264,10 +267,17 @@ bool read(std::span<const std::byte> list, Snapshot& output) {
             cue.status = CueStatus::missing;
         } else if (matches == 1) {
             cue.status = CueStatus::resolved;
+        } else if (malformed) {
+            cue.status = CueStatus::malformed;
+        } else if (candidates == 1) {
+            // A sole tree is the cue's content even when its length disagrees; keep its lines.
+            cue.status = CueStatus::mismatched;
+            matched = std::move(unmatched);
         } else {
-            cue.status = candidates > 1 && !malformed ? CueStatus::ambiguous : CueStatus::malformed;
+            cue.status = CueStatus::ambiguous;
         }
-        if (matches != 1 || matched.size() > (std::numeric_limits<std::uint32_t>::max)()
+        if ((cue.status != CueStatus::resolved && cue.status != CueStatus::mismatched)
+            || matched.size() > (std::numeric_limits<std::uint32_t>::max)()
             || output.lines.size() > (std::numeric_limits<std::uint32_t>::max)() - matched.size()) {
             continue;
         }

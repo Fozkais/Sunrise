@@ -186,6 +186,23 @@ void log_dialogue_list(const squads::DescriptorFact& descriptor,
     }
 }
 
+/** @return The log result name of one cue status. */
+const char* cue_status_name(dialogue_list::CueStatus status) noexcept {
+    switch (status) {
+    case dialogue_list::CueStatus::resolved:
+        return "cue_resolved";
+    case dialogue_list::CueStatus::ambiguous:
+        return "cue_ambiguous";
+    case dialogue_list::CueStatus::missing:
+        return "cue_missing";
+    case dialogue_list::CueStatus::malformed:
+        return "cue_malformed";
+    case dialogue_list::CueStatus::mismatched:
+        return "cue_window_mismatch";
+    }
+    return "cue_unknown";
+}
+
 } // namespace
 
 /**
@@ -402,23 +419,24 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
                     cueRow.listTag = resourceTag;
                     cueRow.definitionHash = row.definitionHash;
                     cueRow.authoredWindowSeconds = row.seconds;
-                    if (row.status == dialogue_list::CueStatus::resolved) {
+                    const bool mismatched = row.status == dialogue_list::CueStatus::mismatched;
+                    const bool hasLines =
+                        mismatched || row.status == dialogue_list::CueStatus::resolved;
+                    if (hasLines) {
                         cueRow.lineCount = row.lineCount;
-                        cueRow.flags = format::kDialogueCueLinesExact;
+                        cueRow.flags = format::kDialogueCueLinesExact
+                                       | (mismatched ? format::kDialogueCueWindowMismatch : 0U);
                     }
                     output.dialogueCues.push_back(cueRow);
-                    if (row.status == dialogue_list::CueStatus::ambiguous
-                        || row.status == dialogue_list::CueStatus::missing
-                        || row.status == dialogue_list::CueStatus::malformed) {
-                        log_dialogue_list(
-                            descriptor,
-                            resourceTag,
-                            row.status == dialogue_list::CueStatus::ambiguous ? "cue_ambiguous"
-                            : row.status == dialogue_list::CueStatus::missing ? "cue_missing"
-                                                                              : "cue_malformed",
-                            row.definitionHash,
-                            static_cast<std::uint32_t>(cue),
-                            core::log::Level::warn);
+                    if (row.status != dialogue_list::CueStatus::resolved) {
+                        log_dialogue_list(descriptor,
+                                          resourceTag,
+                                          cue_status_name(row.status),
+                                          row.definitionHash,
+                                          static_cast<std::uint32_t>(cue),
+                                          core::log::Level::warn);
+                    }
+                    if (!hasLines) {
                         continue;
                     }
                     // Both takes of a line normally reference the same text; each is still its
