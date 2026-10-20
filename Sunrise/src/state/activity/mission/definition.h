@@ -193,7 +193,6 @@ enum class IntentKind : std::uint8_t {
     watchDamage,
     setGhostLink,
     holdSpawn,
-    setSquadAttachment,
 };
 
 /** Actor sequence values belong to one combatant and one SDK/client generation. */
@@ -241,8 +240,6 @@ struct TypedIntent final {
     IntentKind kind{IntentKind::placeSquad};
     std::uint32_t firstRow{};
     std::uint32_t secondRow{};
-    /** Placement spawn generation of a setSquadAttachment source squad. */
-    std::uint64_t sourceSpawnGeneration{};
     std::uint32_t sceneEventKey{};
     std::uint32_t objectTag{};
     std::uint32_t registryKey{};

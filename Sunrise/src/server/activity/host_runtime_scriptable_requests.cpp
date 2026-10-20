@@ -639,8 +639,7 @@ bool request_sdk_auth_override(
     std::uint16_t bitCount,
     std::uint64_t expectedActivityClientGeneration,
     const ScriptableOutputReservation* reservation,
-    ScriptableOverrideKind kind,
-    std::optional<SquadAttachmentOwnership> attachment) noexcept {
+    ScriptableOverrideKind kind) noexcept {
     if ((kind != ScriptableOverrideKind::sdkAuth && !counter_auth::compatible(kind, target))
         || body.empty() || body.size() > scene::kAuthOverrideByteCapacity
         || body.size() > (std::numeric_limits<std::uint16_t>::max)()
@@ -662,7 +661,6 @@ bool request_sdk_auth_override(
     request.authByteCount = static_cast<std::uint16_t>(body.size());
     request.expectedActivityClientGeneration = expectedActivityClientGeneration;
     request.kind = kind;
-    request.squadAttachment = attachment;
     return enqueue_request(request, reservation);
 }
 

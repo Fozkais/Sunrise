@@ -13,7 +13,6 @@
 #include "host_runtime_counter_auth.h"
 #include "host_runtime_ghost_link.h"
 #include "host_runtime_internal.h"
-#include "squad_attachment_ownership_validation.h"
 
 namespace sunrise::server::activity::host {
 namespace {
@@ -186,7 +185,7 @@ namespace detail {
            && left.byteCount == right.byteCount && left.channel == right.channel
            && left.channelValue == right.channelValue && left.channelHash == right.channelHash
            && left.lifetimeState == right.lifetimeState && left.body == right.body
-           && left.sdkCompiled == right.sdkCompiled && left.squadAttachment == right.squadAttachment
+           && left.sdkCompiled == right.sdkCompiled
            && (!left.target.stateLocalRoster
                || same_group(left.stateLocalRosterGroup, right.stateLocalRosterGroup));
 }
@@ -207,14 +206,6 @@ namespace detail {
     }
     for (PendingScriptableOverride& retained : instance.scriptableAuthEstate) {
         if (same_client_ref(retained.target, pending.target)) {
-            // An objective assignment rewrites the squad's ClientRef row (kind squadObjective,
-            // generation = objective revision, patch body without the spawn generation). Carry the
-            // placement's spawn generation so attachment ownership can still name its lifetime.
-            if (owned.kind == ScriptableOverrideKind::squadObjective) {
-                owned.squadSpawnGeneration = retained.kind == ScriptableOverrideKind::squad
-                                                 ? retained.generation
-                                                 : retained.squadSpawnGeneration;
-            }
             retained = owned;
             return true;
         }
@@ -249,8 +240,6 @@ retained_sequence_combatant(const Instance& instance, const ScriptableRequest& r
     // Lifetime requests carry no ClientRef.
     const bool untargeted = request.kind == ScriptableOverrideKind::lifetime;
     if ((!untargeted && !supported_target(request.target))
-        || (request.squadAttachment
-            && (request.kind != ScriptableOverrideKind::sdkAuth || request.burstMember))
         || !state::activity::binding_matches(request.binding)) {
         return false;
     }
@@ -364,7 +353,6 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
     }
     PendingScriptableOverride pending{};
     pending.target = request.target;
-    pending.squadAttachment = request.squadAttachment;
     pending.stateLocalRosterGroup = request.stateLocalRosterGroup;
     pending.revision = request.expectedRevision == 0 ? instance->view.scriptableRevision + 1
                                                      : request.expectedRevision;
@@ -373,13 +361,7 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
     pending.expectedActivityClientGeneration = request.expectedActivityClientGeneration;
     std::size_t written = 0;
     std::size_t writtenBits = 0;
-    bool encoded = (untargeted || guard != nullptr)
-                   && request.authByteCount <= request.authBody.size()
-                   && attachments::admits(request.target,
-                                          request.squadAttachment,
-                                          instance->scriptableAuthEstate,
-                                          std::span(request.authBody).first(request.authByteCount),
-                                          request.authBitCount);
+    bool encoded = untargeted || guard != nullptr;
     if (encoded && request.kind == ScriptableOverrideKind::lifetime) {
         pending.lifetimeState = request.lifetimeState;
     } else if (encoded && request.kind == ScriptableOverrideKind::squad) {
@@ -661,8 +643,7 @@ void apply_scriptable_control(const ScriptableRequest& request, std::uint64_t no
             pending.bitCount = static_cast<std::uint16_t>(composedBits);
         }
     }
-    if (!encoded || written > (std::numeric_limits<std::uint16_t>::max)()
-        || !attachments::permits_source_write(pending, instance->scriptableAuthEstate)) {
+    if (!encoded || written > (std::numeric_limits<std::uint16_t>::max)()) {
         ++g_refusedControls;
     } else {
         if (guard != nullptr && !guard->occupied) {

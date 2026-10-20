@@ -213,7 +213,6 @@ struct ScriptableTarget final {
     std::uint8_t slotType{};
     /** This group is safe only in the exact selected state pinned by the requesting link. */
     bool stateLocalRoster{};
-    bool operator==(const ScriptableTarget&) const = default;
 };
 
 /** Exact unarmed Host output lane held while Mission State publishes its matching revision. */
@@ -878,19 +877,6 @@ struct PendingIncident final {
     std::uint64_t revision{};
 };
 
-/** The squad a type-26 attachment follows, and the SDK and placement lifetime it was chosen in. */
-struct SquadAttachmentOwnership final {
-    std::array<std::byte, 32> sdkBuildSha256{};
-    /** Catalog payload digest; an update must match the one the retained attachment used. */
-    std::array<std::byte, 32> sdkPayloadSha256{};
-    ScriptableTarget source{};
-    /** Placement spawn generation of the source squad. */
-    std::uint64_t sourceSpawnGeneration{};
-    /** True to select the source, false to clear the selection. */
-    bool active{};
-    bool operator==(const SquadAttachmentOwnership&) const = default;
-};
-
 /** Immutable typed body retained byte-for-byte until exact transport staging. */
 struct PendingScriptableOverride final {
     std::uint32_t actorSpawnGeneration{};
@@ -921,10 +907,6 @@ struct PendingScriptableOverride final {
     /** Activity lifetime state for a lifetime request; ignored by every other kind. */
     std::uint8_t lifetimeState{kDefaultLifetimeState};
     bool sdkCompiled{};
-    /** Present only for a type-26 attachment written through set_squad_attachment. */
-    std::optional<SquadAttachmentOwnership> squadAttachment{};
-    /** For a squadObjective row: spawn generation of the placement it replaced. Zero otherwise. */
-    std::uint64_t squadSpawnGeneration{};
 };
 
 /**
@@ -1223,16 +1205,15 @@ request_lifetime_override(const state::activity::SessionBinding& binding,
                           const ScriptableOutputReservation* reservation = nullptr) noexcept;
 
 /** Queues one exact SDK-compiled Auth body for a generation-bound ClientRef. */
-[[nodiscard]] bool request_sdk_auth_override(
-    const state::activity::SessionBinding& binding,
-    const ScriptableTarget& target,
-    const state::build_data::scenarios::RosterGroup* stateLocalRosterGroup,
-    std::span<const std::byte> body,
-    std::uint16_t bitCount,
-    std::uint64_t expectedActivityClientGeneration,
-    const ScriptableOutputReservation* reservation = nullptr,
-    ScriptableOverrideKind kind = ScriptableOverrideKind::sdkAuth,
-    std::optional<SquadAttachmentOwnership> attachment = std::nullopt) noexcept;
+[[nodiscard]] bool
+request_sdk_auth_override(const state::activity::SessionBinding& binding,
+                          const ScriptableTarget& target,
+                          const state::build_data::scenarios::RosterGroup* stateLocalRosterGroup,
+                          std::span<const std::byte> body,
+                          std::uint16_t bitCount,
+                          std::uint64_t expectedActivityClientGeneration,
+                          const ScriptableOutputReservation* reservation = nullptr,
+                          ScriptableOverrideKind kind = ScriptableOverrideKind::sdkAuth) noexcept;
 
 /** @return True while any live instance holds a committed output the transport has not sent. */
 [[nodiscard]] bool any_output_pending() noexcept;

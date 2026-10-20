@@ -302,8 +302,7 @@ bool request_activity_sdk_auth_override(
     std::int32_t expectedRegion,
     std::uint64_t expectedGeneration,
     const activity::host::ScriptableOutputReservation* reservation,
-    activity::host::ScriptableOverrideKind kind,
-    std::optional<activity::host::SquadAttachmentOwnership> attachment) noexcept {
+    activity::host::ScriptableOverrideKind kind) noexcept {
     const std::lock_guard lock(session_lock());
     std::size_t linkCount = 0;
     const Session* const session = unique_activity_link_locked(binding, linkCount);
@@ -327,8 +326,7 @@ bool request_activity_sdk_auth_override(
                                                                      bitCount,
                                                                      expectedGeneration,
                                                                      reservation,
-                                                                     kind,
-                                                                     attachment);
+                                                                     kind);
     return queued;
 }
 

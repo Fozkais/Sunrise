@@ -121,8 +121,6 @@ template <bool Row> void client_message_row(lua_State* state, const host::Event&
         return "slot.set_interactable_object";
     case ActionKind::setGhostLink:
         return "slot.set_ghost_link";
-    case ActionKind::setSquadAttachment:
-        return "slot.set_squad_attachment";
     case ActionKind::watchDamage:
         return "slot.watch_damage";
     case ActionKind::assignCombatObjective:

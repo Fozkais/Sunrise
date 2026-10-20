@@ -7,10 +7,8 @@
 #include "../../../middleware/bap/activity_message/darkness_zone_auth.h"
 #include "../../../middleware/bap/activity_message/ghost_link_auth.h"
 #include "../../../middleware/bap/activity_message/map_generator_auth.h"
-#include "../../../middleware/bap/activity_message/mission_effect_auth.h"
 #include "../../../middleware/bap/activity_message/music_section_auth.h"
 #include "../../../middleware/bap/activity_message/scriptable_auth_body.h"
-#include "../../../middleware/bap/activity_message/squad_attachment_auth.h"
 #include "../../../middleware/bap/activity_message/squad_objective_auth.h"
 #include "../../../middleware/bap/activity_message/volume_toggle_auth.h"
 #include "../../../state/activity/mission/definition.h"
@@ -80,13 +78,13 @@ inline constexpr ValueSpec kObjectFilterArguments[]{
      .optional = true,
      .bound = between(1, static_cast<std::int64_t>(slot_auth::kType34PredicateCapacity)),
      .element = kFilterObject,
-     .note = "adds one test per object, for example every crystal a beam hop-on tethers"},
+     .note = "adds one test per object"},
     {.name = "squad",
      .kind = ValueKind::handle,
      .ref = "slot",
      .optional = true,
      .slot = type_gate(slot_format::kSquadSlotType),
-     .note = "adds a test: the squad a shield or tether hop-on hosts on"},
+     .note = "adds a test: this squad"},
     {.name = "inside",
      .kind = ValueKind::handle,
      .ref = "slot",
@@ -100,8 +98,6 @@ inline constexpr ValueSpec kObjectFilterArguments[]{
      .element = kVolume,
      .note = "adds a test: objects inside any of these volumes"},
 };
-inline constexpr ValueSpec kRequiredActive{
-    .name = "active", .kind = ValueKind::boolean, .note = "true turns it on, false off"};
 inline constexpr ValueSpec kVolumeActiveArguments[]{
     {.name = "volume",
      .kind = ValueKind::handle,
@@ -109,38 +105,7 @@ inline constexpr ValueSpec kVolumeActiveArguments[]{
      .slot = type_gate(slot_auth::kVolumeSlotType),
      .scope = Scope::sameObject,
      .note = "an authored volume of the toggle's own object"},
-    kRequiredActive,
-};
-inline constexpr ValueSpec kSquadAttachmentArguments[]{
-    {.name = "source",
-     .kind = ValueKind::handle,
-     .ref = "slot",
-     .slot = exact_gate(slot_format::kSquadSlotType),
-     .scope = Scope::sameObject,
-     .note = "the squad of the same object the attachment follows"},
-    {.name = "spawn_generation",
-     .kind = ValueKind::integer,
-     .bound = between(1, kInt32Maximum),
-     .note = "the source placement's spawn_generation; any other placement is refused as stale"},
-    kRequiredActive,
-};
-inline constexpr ValueSpec kMissionEffectArguments[]{
-    {.name = "filter",
-     .kind = ValueKind::handle,
-     .ref = "slot",
-     .optional = true,
-     .slot = type_gate(slot_auth::kType34SlotType),
-     .note = "the type-34 filter selecting the hosts; required while enabled"},
-    {.name = "enabled",
-     .kind = ValueKind::boolean,
-     .optional = true,
-     .fallback = default_boolean(true)},
-    {.name = "revision",
-     .kind = ValueKind::integer,
-     .optional = true,
-     .fallback = default_integer(1),
-     .bound = between(1, kInt32Maximum),
-     .note = "raise it to make the client apply an unchanged effect again"},
+    {.name = "active", .kind = ValueKind::boolean, .note = "true turns it on, false off"},
 };
 inline constexpr ValueSpec kWatchDamageArguments[]{
     {.name = "target", .kind = ValueKind::handle, .ref = "slot", .slot = kExactObject},
@@ -501,21 +466,6 @@ inline constexpr MemberSpec kSlotMembers[]{
      .arguments = kVolumeActiveArguments,
      .returns = kRequestKey,
      .note = "turns one authored volume on or off through its type-32 toggle"},
-    {.name = "set_squad_attachment",
-     .kind = MemberKind::request,
-     .call = CallForm::named,
-     .gate = exact_gate(slot_auth::kType26SlotType),
-     .arguments = kSquadAttachmentArguments,
-     .returns = kRequestKey,
-     .effect = "slot.set_squad_attachment",
-     .note = "selects or clears the squad a type-26 attachment follows"},
-    {.name = "set_mission_effect",
-     .kind = MemberKind::request,
-     .call = CallForm::named,
-     .gate = schema_gate(slot_auth::kType26SlotType),
-     .arguments = kMissionEffectArguments,
-     .returns = kRequestKey,
-     .note = "attaches the authored hop-on effect to the entities a type-34 filter selects"},
     {.name = "watch_damage",
      .kind = MemberKind::request,
      .call = CallForm::named,

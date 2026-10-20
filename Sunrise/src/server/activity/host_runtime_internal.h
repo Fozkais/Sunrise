@@ -49,7 +49,6 @@ struct ScriptableRequest final {
     std::array<std::byte,
                middleware::bap::activity_message::sensor_auth_update::kAuthOverrideByteCapacity>
         authBody{};
-    std::optional<SquadAttachmentOwnership> squadAttachment{};
     std::size_t requestedCountLength{};
     std::uint16_t authBitCount{};
     std::uint16_t authByteCount{};

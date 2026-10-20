@@ -7,7 +7,6 @@
 
 #include "../../middleware/content/packages/tables/authored_squad_reader.h"
 #include "../../middleware/content/packages/tables/region_reader.h"
-#include "../../state/activity/membership/activity_membership_query.h"
 #include "../../state/activity/runtime.h"
 #include "../../state/activity_sdk/squad_profiles.h"
 #include "../../state/build_data/runtime.h"
