@@ -20,14 +20,10 @@
 namespace sunrise::server::activity::mission {
 namespace {
 
-/** Values in one occupancy body: any, all, intersection count, and copied Auth value. */
-constexpr std::size_t kTriggerOccupancyValueCount = 4;
-constexpr std::uint16_t kTriggerAnyOrdinal = 0;
-constexpr std::uint16_t kTriggerAllOrdinal = 1;
-constexpr std::uint16_t kTriggerCountOrdinal = 2;
-constexpr std::uint16_t kTriggerThresholdOrdinal = 3;
 /** Root ordinal of the squad removal flag. The rest of the root is inert on this build. */
 constexpr std::uint16_t kSquadRemovalOrdinal = 8;
+/** Root ordinal 0 echoes the spawn generation the squad's placement Auth carries. */
+constexpr std::uint16_t kSquadSpawnGenerationOrdinal = 0;
 /** Root ordinals of the type-20 damage Sense body: health, shield, then the echoed revision. */
 constexpr std::uint16_t kDamageHealthOrdinal = 0;
 constexpr std::uint16_t kDamageShieldOrdinal = 1;
@@ -88,6 +84,18 @@ sense_value(std::span<const sense_values::DecodedValue> body,
     event.firstSlotType = observation.key.slotType;
     event.slotObjectTag = observation.key.objectTag;
     event.slotSenseSchema = observation.key.senseSchema;
+    event.senseGenerationPlusOne = observation.generationPlusOne;
+    event.hasSenseGeneration = observation.hasGeneration;
+    return event;
+}
+
+/** @return A squad edge carrying the squad's retained spawn generation. */
+[[nodiscard]] host::Event squad_edge_event(const RuntimeInstance& instance,
+                                           const host::SenseObservation& observation,
+                                           const SquadObservation& squad) noexcept {
+    host::Event event = sense_edge_event(instance, observation);
+    event.squadSpawnGeneration = squad.spawnGeneration;
+    event.squadHasSpawnGeneration = squad.hasSpawnGeneration;
     return event;
 }
 
@@ -205,26 +213,58 @@ void objective_task_counters(std::span<const sense_values::DecodedValue> body,
     output.blocks = static_cast<std::uint8_t>((std::min)(blocks, output.value.size()));
 }
 
+/**
+ * Raises one triggerState event for a report its tracker does not drop. The event only informs;
+ * entered and exited follow the level alone.
+ * @param event The report's level, already filled in.
+ */
+void push_trigger_state(RuntimeInstance& instance,
+                        const host::SenseObservationSnapshot& sense,
+                        const host::SenseObservation& observation,
+                        TriggerOccupancy& slot,
+                        host::Event event) noexcept {
+    trigger_observation::Snapshot level{};
+    const bool valid =
+        observation.valueCount <= sense.valueCount - observation.firstValue
+        && trigger_observation::read(std::span(sense.values.data(), sense.valueCount)
+                                         .subspan(observation.firstValue, observation.valueCount),
+                                     level);
+    const auto result = slot.tracker.observe(valid ? &level : nullptr,
+                                             instance.view.activityClientGeneration,
+                                             observation.sourceGeneration,
+                                             observation.sequence,
+                                             observation.generationPlusOne,
+                                             observation.hasGeneration);
+    if (!result.notify) {
+        return;
+    }
+    event.kind = host::EventKind::triggerState;
+    event.triggerAvailable = result.available;
+    event.triggerContinuity = static_cast<std::uint8_t>(result.continuity);
+    push_script_event(instance, event);
+}
+
 } // namespace
 
 /**
- * Raises one event per watched volume whose occupancy changed.
+ * Raises one event per watched volume whose occupancy changed, after its triggerState report.
  * The client publishes occupancy as a level, so the edge is ours to derive. A volume seen for the
  * first time only records its level, because a first observation is not an entry.
  */
 void push_trigger_edges(RuntimeInstance& instance,
                         const host::SenseObservationSnapshot& sense) noexcept {
+    namespace trigger = trigger_observation;
     for (std::size_t index = 0; index < sense.observationCount; ++index) {
         const host::SenseObservation& observation = sense.observations[index];
         if (observation.key.slotType != format::kOccupancySlotType
-            || observation.valueCount < kTriggerOccupancyValueCount
-            || observation.firstValue + kTriggerOccupancyValueCount > sense.valueCount) {
+            || observation.valueCount < trigger::kValueCount
+            || observation.firstValue + trigger::kValueCount > sense.valueCount) {
             continue;
         }
         const std::span<const sense_values::DecodedValue> body(
-            &sense.values[observation.firstValue], kTriggerOccupancyValueCount);
+            &sense.values[observation.firstValue], trigger::kValueCount);
         const std::uint32_t root = observation.key.schemaRow;
-        const bool occupied = sense_flag(body, root, kTriggerAnyOrdinal);
+        const bool occupied = sense_flag(body, root, trigger::kOccupiedOrdinal);
         TriggerOccupancy* slot = nullptr;
         TriggerOccupancy* spare = nullptr;
         for (TriggerOccupancy& retained : instance.triggerOccupancy) {
@@ -238,26 +278,29 @@ void push_trigger_edges(RuntimeInstance& instance,
                 spare = &retained;
             }
         }
-        if (slot == nullptr) {
+        const bool first = slot == nullptr;
+        if (first) {
             if (spare == nullptr) {
                 log_line(core::log::Level::warn, &instance, "trigger", "watch_capacity");
                 continue;
             }
-            spare->registryKey = observation.key.registryKey;
-            spare->objectTag = observation.key.objectTag;
-            spare->slotIndex = observation.key.slotIndex;
-            spare->occupied = occupied;
-            spare->used = true;
-            continue;
+            slot = spare;
+            slot->registryKey = observation.key.registryKey;
+            slot->objectTag = observation.key.objectTag;
+            slot->slotIndex = observation.key.slotIndex;
+            slot->occupied = occupied;
+            slot->used = true;
         }
-        if (slot->occupied == occupied) {
+        host::Event event = sense_edge_event(instance, observation);
+        event.triggerOccupied = occupied;
+        event.triggerAll = sense_flag(body, root, trigger::kAllOrdinal);
+        event.triggerCount = sense_number(body, root, trigger::kCountOrdinal);
+        event.triggerValue = sense_number(body, root, trigger::kThresholdOrdinal);
+        push_trigger_state(instance, sense, observation, *slot, event);
+        if (first || slot->occupied == occupied) {
             continue;
         }
         slot->occupied = occupied;
-        host::Event event = sense_edge_event(instance, observation);
-        event.triggerAll = sense_flag(body, root, kTriggerAllOrdinal);
-        event.triggerCount = sense_number(body, root, kTriggerCountOrdinal);
-        event.triggerValue = sense_number(body, root, kTriggerThresholdOrdinal);
         event.kind = occupied ? host::EventKind::triggerEntered : host::EventKind::triggerExited;
         push_script_event(instance, event);
     }
@@ -416,6 +459,9 @@ void push_object_interaction_edges(RuntimeInstance& instance,
             slot->level, observation_values(observation, sense), observation.key.schemaRow);
         const ObjectInteractionLevel& level = slot->level;
         host::Event event = sense_edge_event(instance, observation);
+        event.initialObservation = !before.stateKnown || before.generation != level.generation;
+        event.objectEntryIndex = level.entryIndex;
+        event.objectSpawnMask = level.spawnMask;
         event.objectGeneration = level.generation;
         event.objectPresent = level.present;
         // The alive lane carries Sense ordinal 1, which the script reads as interaction_open.
@@ -543,6 +589,15 @@ void push_squad_edges(RuntimeInstance& instance,
         }
         const bool first = !squad->used;
         squad->used = true;
+        squad->populationKnown = squad->populationKnown || hasAlive;
+        // An absent spawn generation keeps the last one reported, like the other retained levels.
+        const sense_values::DecodedValue* const spawn =
+            sense_value(body, root, kSquadSpawnGenerationOrdinal);
+        if (spawn != nullptr && spawn->present && spawn->signedValue >= 0
+            && spawn->signedValue <= kMaximumCounter) {
+            squad->spawnGeneration = static_cast<std::int32_t>(spawn->signedValue);
+            squad->hasSpawnGeneration = true;
+        }
         const std::int32_t previousAlive = first ? 0 : squad->aliveCount;
         const bool changed =
             costsChanged || first || squad->aliveCount != alive || squad->removalFlag != removal
@@ -550,16 +605,18 @@ void push_squad_edges(RuntimeInstance& instance,
         if (!changed) {
             continue;
         }
-        host::Event state = sense_edge_event(instance, observation);
+        host::Event state = squad_edge_event(instance, observation, *squad);
         state.squadObjectiveCosts = squad->objectiveCosts.values;
         state.squadObjectiveCostMask = squad->objectiveCosts.known;
         state.squadObjectiveRevision = squad->objectiveCosts.revision;
         qualify_objective_costs(instance, state);
         state.squadAliveCount = alive;
         state.squadPreviousAliveCount = previousAlive;
+        state.squadPopulationAvailable = squad->populationKnown;
         state.squadRemovalFlag = removal;
         state.squadSlotCounts = counts;
         state.squadSlotCountLength = countLength;
+        state.initialObservation = first;
         state.kind = host::EventKind::squadState;
         if (instance.programStatus == ProgramStatus::loaded) {
             push_script_event(instance, state);
@@ -571,7 +628,7 @@ void push_squad_edges(RuntimeInstance& instance,
             if (counts[slot] <= previous) {
                 continue;
             }
-            host::Event spawned = sense_edge_event(instance, observation);
+            host::Event spawned = squad_edge_event(instance, observation, *squad);
             spawned.squadSlotOrdinal = slot;
             spawned.squadSlotValue = counts[slot];
             spawned.squadPreviousSlotValue = previous;
@@ -581,9 +638,10 @@ void push_squad_edges(RuntimeInstance& instance,
             }
         }
         if (!first && alive < squad->aliveCount) {
-            host::Event died = sense_edge_event(instance, observation);
+            host::Event died = squad_edge_event(instance, observation, *squad);
             died.squadAliveCount = alive;
             died.squadPreviousAliveCount = squad->aliveCount;
+            died.squadRemovalFlag = removal;
             died.kind = host::EventKind::entityDied;
             if (instance.programStatus == ProgramStatus::loaded) {
                 push_script_event(instance, died);

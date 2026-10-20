@@ -25,6 +25,7 @@
 #include "mission_script_runtime.h"
 #include "mission_script_squad_sense.h"
 #include "mission_script_vm.h"
+#include "mission_trigger_observation.h"
 
 // What the mission-runtime translation units share: the instance table and service slice,
 // the attach pipeline, the two Host feeds and the VM callback, the panel rows, the delivery state
@@ -109,8 +110,10 @@ constexpr std::uint64_t kTransportTimeoutMs = 15'000;
 /** How long an enqueued Host output may take to reach the reducer before it is reconciled. */
 constexpr std::uint64_t kHostCommitTimeoutMs = 2'000;
 
-/** Last occupancy seen for one watched volume, so only a change raises an event. */
+/** Last occupancy seen for one watched volume, so only a change raises an edge. */
 struct TriggerOccupancy final {
+    /** Counter continuity of the volume's reports, for triggerState events only. */
+    trigger_observation::Tracker tracker{};
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
     std::uint16_t slotIndex{};
@@ -181,9 +184,14 @@ struct SquadObservation final {
     std::uint32_t registryKey{};
     std::uint32_t objectTag{};
     std::int32_t aliveCount{};
+    /** Last spawn generation the squad Sense echoed from its placement Auth. */
+    std::int32_t spawnGeneration{};
     std::uint16_t slotIndex{};
     std::uint8_t slotCountLength{};
     bool removalFlag{};
+    bool hasSpawnGeneration{};
+    /** An alive count was reported; until then aliveCount is a zero placeholder. */
+    bool populationKnown{};
     bool used{};
 };
 /** Last completion latch seen for one watched authored scene, so only the edge raises an event. */
@@ -249,6 +257,8 @@ struct RuntimeInstance final {
     std::array<GhostObservation, kGhostObservationCapacity> ghostObservations{};
     std::array<DamageObservation, kDamageObservationCapacity> damageObservations{};
     std::array<CombatantDamageObservation, kSquadObservationCapacity> combatantDamageObservations{};
+    /** Damage levels replicated by authored entities, kept apart from the Type-2 Sense rows. */
+    std::array<CombatantDamageObservation, kSquadObservationCapacity> entityDamageObservations{};
     std::array<DeviceObservation, kDeviceObservationCapacity> deviceObservations{};
     std::array<ObjectInteractionObservation, kObjectInteractionObservationCapacity>
         objectInteractionObservations{};
@@ -307,7 +317,7 @@ void publish_fireteam_life(std::uint64_t now) noexcept;
 void observe_player_life(RuntimeInstance& instance,
                          const host::SenseObservationSnapshot& sense) noexcept;
 
-/** Raises one event per watched trigger volume whose occupancy changed. */
+/** Raises one triggerState per report, and one edge per watched volume whose occupancy changed. */
 void push_trigger_edges(RuntimeInstance& instance,
                         const host::SenseObservationSnapshot& sense) noexcept;
 /** Raises one dedicated type-31 edge from a decoded schema-0x8080879F msg-19 payload. */
@@ -323,6 +333,14 @@ void push_damage_edges(RuntimeInstance& instance,
 /** Raises observed Type-2 damage pools and lifecycle resets without inferring damage. */
 void push_combatant_damage_edges(RuntimeInstance& instance,
                                  const host::SenseObservationSnapshot& sense) noexcept;
+/** Raises a damage state from an entity's replicated damage levels (fractions of full). */
+void push_entity_damage(RuntimeInstance& instance,
+                        std::uint32_t registryKey,
+                        std::uint8_t slotType,
+                        std::uint16_t slotIndex,
+                        float primary,
+                        float secondary,
+                        std::uint64_t tick) noexcept;
 /** Raises current device values and sequence resets from accepted client reports. */
 void push_device_edges(RuntimeInstance& instance,
                        const host::SenseObservationSnapshot& sense) noexcept;

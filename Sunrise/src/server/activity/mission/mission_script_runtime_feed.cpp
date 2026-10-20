@@ -78,6 +78,7 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
     case host::EventKind::phaseEntered:
     case host::EventKind::triggerEntered:
     case host::EventKind::triggerExited:
+    case host::EventKind::triggerState:
     case host::EventKind::squadState:
     case host::EventKind::squadProvoked:
     case host::EventKind::entitySpawned:
@@ -123,6 +124,7 @@ void clear_pending_event(PendingMissionEvent& pending) noexcept {
            || event.kind == host::EventKind::effectResult
            || event.kind == host::EventKind::phaseEntered
            || event.kind == host::EventKind::triggerEntered
+           || event.kind == host::EventKind::triggerState
            || event.kind == host::EventKind::triggerExited
            || event.kind == host::EventKind::squadState
            || event.kind == host::EventKind::squadProvoked
