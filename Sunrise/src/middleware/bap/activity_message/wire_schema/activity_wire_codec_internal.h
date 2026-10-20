@@ -114,9 +114,9 @@ public:
     }
 }
 
-/** Types 12 and 35 are raw 64-bit words, read and written whole. */
+/** @return True for a raw 64-bit field type. */
 [[nodiscard]] constexpr bool is_raw64(std::uint8_t typeCode) noexcept {
-    return typeCode == 12 || typeCode == 35;
+    return typeCode == runtime::kRaw64AliasType || typeCode == runtime::kRaw64Type;
 }
 
 /** @return A low bit mask of the given width. Width 0 masks everything away. */

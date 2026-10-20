@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -18,6 +19,21 @@ namespace bits = middleware::encoding::bits;
 constexpr std::uint32_t kMaximumByteField = 0xFFU;
 /** A schema reference the mirror retains must fit one 32-bit tag. */
 constexpr std::uint64_t kMaximumSemanticTag = 0xFFFFFFFFULL;
+/** Field type 22 is the native nullable-u32 reader: one present bit, then 32 bits. */
+constexpr std::uint8_t kNullableU32Type = 22;
+/** Field type 21 reads through the nullable-u32 reader in every family. */
+constexpr std::uint8_t kNullableU32AliasType = 21;
+/** In mode one, field type 37 is a plain nested walk of kNestedCustomSchema. */
+constexpr std::uint8_t kNestedCustomType = 37;
+/** The type-37 schema: a 19-bit real and a 5-bit int8, 24 bits in all. */
+constexpr std::uint32_t kNestedCustomSchema = 0x808092FFU;
+/** The damage component replicates each level pool as its own walk of kDamagePoolSchema. */
+constexpr std::uint32_t kDamageComponent = 0x80804BEEU;
+/** One pool level; its single field is the only value it decodes. */
+constexpr std::uint32_t kDamagePoolSchema = 0x80804C5CU;
+/** Pool 0 is health and pool 1 the shield. */
+constexpr std::uint8_t kHealthPool = 0;
+constexpr std::uint8_t kShieldPool = 1;
 
 /** Resolves one schema only when it supports the selected codec family. */
 [[nodiscard]] bool
@@ -85,9 +101,8 @@ read_schema(const void* raw, std::uint32_t rowIndex, wire::runtime::SchemaView& 
     if (family != format::RuntimeCodecFamily::sobjectModeZero && type == 30) {
         return 18;
     }
-    // Type 21 uses the native nullable-u32 reader in every family: one present bit, then 32.
-    if (type == 21) {
-        return 22;
+    if (type == kNullableU32AliasType) {
+        return kNullableU32Type;
     }
     if (family == format::RuntimeCodecFamily::sobjectModeOne) {
         // Types 18, 20, 30 and 31 share one native mode-one reader.
@@ -106,15 +121,13 @@ read_schema(const void* raw, std::uint32_t rowIndex, wire::runtime::SchemaView& 
                                       format::RuntimeCodecFamily family,
                                       wire::runtime::FieldView& output) noexcept {
     output.typeCode = reference_alias(family, output.typeCode);
-    // In mode one, a type-37 custom field is a plain nested walk of one fixed schema: a 19-bit real
-    // and a 5-bit int8, 24 bits in all.
-    constexpr std::uint32_t kNestedCustomSchema = 0x808092FFU;
-    if (family == format::RuntimeCodecFamily::sobjectModeOne && output.typeCode == 37) {
+    if (family == format::RuntimeCodecFamily::sobjectModeOne
+        && output.typeCode == kNestedCustomType) {
         wire::runtime::SchemaView nested{};
         if (!find_schema(raw, kNestedCustomSchema, nested)) {
             return false;
         }
-        output.typeCode = 1;
+        output.typeCode = wire::runtime::kNestedType;
         output.nestedSchemaRow = nested.row;
         // Its fields carry no presence bits, so it needs no slot in the component bitmap.
         output.hasBitmapOffset = true;
@@ -549,10 +562,6 @@ runtime_schema(const CompositeEntityCodecContext& context, std::uint32_t handle)
         }
         *semanticTag = tag;
     }
-    // The damage component sends each level pool as its own ten-bit walk; pool 0 is health.
-    constexpr std::uint32_t kDamageComponent = 0x80804BEEU;
-    // Schema 80804C5C is one pool level; its single field is the only value it decodes.
-    constexpr std::uint32_t kDamagePoolSchema = 0x80804C5CU;
     if (resolverContext.componentTag == kDamageComponent) {
         for (const auto& value : std::span(values).first(result.valueCount)) {
             if (value.schemaHandle != kDamagePoolSchema || !value.present) {
@@ -563,16 +572,17 @@ runtime_schema(const CompositeEntityCodecContext& context, std::uint32_t handle)
                                  : value.kind == wire::ValueKind::signedInteger
                                      ? static_cast<double>(value.signedValue)
                                      : static_cast<double>(value.unsignedValue);
-            if (!(level >= 0.0 && level <= 1023.0)) {
+            if (!(level >= 0.0 && level <= static_cast<double>(kDamageLevelFull))) {
                 continue;
             }
-            if (mirror.damagePools == 0) {
-                mirror.damageHealth = static_cast<std::uint16_t>(level + 0.5);
+            const auto rounded = static_cast<std::uint16_t>(std::lround(level));
+            if (mirror.damagePools == kHealthPool) {
+                mirror.damageHealth = rounded;
                 mirror.damageKnown = true;
-            } else if (mirror.damagePools == 1) {
-                mirror.damageShield = static_cast<std::uint16_t>(level + 0.5);
+            } else if (mirror.damagePools == kShieldPool) {
+                mirror.damageShield = rounded;
             }
-            if (mirror.damagePools != 0xFF) {
+            if (mirror.damagePools != (std::numeric_limits<std::uint8_t>::max)()) {
                 ++mirror.damagePools;
             }
         }

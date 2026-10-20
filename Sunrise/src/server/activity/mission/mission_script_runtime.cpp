@@ -18,6 +18,7 @@
 
 #include "../../../core/logging/log.h"
 #include "../../../core/settings/settings.h"
+#include "../../../middleware/gameplay/external/external_entity_codec.h"
 #include "../../../state/activity/mission/runtime.h"
 #include "../../../state/activity/runtime.h"
 #include "../../gameplay/squad_entity_retirement.h"
@@ -261,8 +262,8 @@ void report_squad_provoked(const state::activity::SessionBinding& binding,
  * @param registryKey Authored registry key.
  * @param slotType Authored slot type: the squad's, or the combatant's own.
  * @param slotIndex Authored slot index.
- * @param health Pool 0 of the damage component, 0..1023.
- * @param shield Pool 1 of the damage component, 0..1023.
+ * @param health Pool 0 of the damage component, 0 to kDamageLevelFull.
+ * @param shield Pool 1 of the damage component, 0 to kDamageLevelFull.
  */
 void report_squad_damage(const state::activity::SessionBinding& binding,
                          std::uint64_t sourceGeneration,
@@ -271,7 +272,8 @@ void report_squad_damage(const state::activity::SessionBinding& binding,
                          std::uint16_t slotIndex,
                          std::uint16_t health,
                          std::uint16_t shield) noexcept {
-    if (sourceGeneration == 0 || registryKey == 0 || health > 1023 || shield > 1023
+    constexpr std::uint16_t full = middleware::gameplay::external::kDamageLevelFull;
+    if (sourceGeneration == 0 || registryKey == 0 || health > full || shield > full
         || slotIndex > static_cast<std::uint16_t>((std::numeric_limits<std::int16_t>::max)())) {
         return;
     }
@@ -282,19 +284,15 @@ void report_squad_damage(const state::activity::SessionBinding& binding,
                            registryKey,
                            slotType,
                            slotIndex,
-                           static_cast<float>(health) / 1023.0F,
-                           static_cast<float>(shield) / 1023.0F,
+                           static_cast<float>(health) / static_cast<float>(full),
+                           static_cast<float>(shield) / static_cast<float>(full),
                            GetTickCount64());
     } else {
-        // Log the first few reports that find no mission; nothing else records them.
-        static unsigned refused = 0;
-        if (refused < 8) {
-            ++refused;
-            log_line(core::log::Level::debug,
-                     instance,
-                     "combatant_damage",
-                     instance == nullptr ? "no_instance" : "stale_generation");
-        }
+        // Nothing else records a level that finds no mission.
+        log_line(core::log::Level::debug,
+                 instance,
+                 "combatant_damage",
+                 instance == nullptr ? "no_instance" : "stale_generation");
     }
     ReleaseSRWLockExclusive(&g_lock);
 }

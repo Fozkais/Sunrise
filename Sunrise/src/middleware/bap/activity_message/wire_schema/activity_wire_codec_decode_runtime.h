@@ -788,10 +788,10 @@ private:
             }
             // The native union reader dispatches through the per-type table, where a nested
             // arm is a no-op and a type-34 arm is the ordinary selected-schema reader.
-            if (field.typeCode == 1) {
+            if (field.typeCode == runtime::kNestedType) {
                 return RuntimeWalkStatus::complete;
             }
-            if (field.typeCode == 34) {
+            if (field.typeCode == runtime::kSelectedType) {
                 return walk_selected(owner, field, occurrence, depth);
             }
             return walk_inline_type(owner, field, occurrence, memory, depth + 1);

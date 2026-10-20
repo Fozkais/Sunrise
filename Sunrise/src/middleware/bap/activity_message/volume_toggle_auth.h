@@ -13,6 +13,10 @@ inline constexpr std::uint32_t kType32Schema = 0x8080955A;
 inline constexpr std::uint8_t kVolumeSlotType = 60;
 inline constexpr std::size_t kType32BitCount = 57;
 inline constexpr std::size_t kType32ByteCount = 8;
+/** The state follows the volume ClientRef as two bits of state plus one; zero is the no-op. */
+inline constexpr std::uint8_t kType32StateWidth = 2;
+inline constexpr std::uint32_t kType32StateOff = 1;
+inline constexpr std::uint32_t kType32StateOn = 2;
 /** One volume and an explicit on/off state; the no-op state -1 is not representable. */
 struct Type32VolumeBody final {
     std::uint32_t registryKey{};
