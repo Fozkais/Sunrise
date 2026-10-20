@@ -301,11 +301,8 @@ bool RewardConditions::load_class_flags(const reader::Source& source,
     if (!tables::read_array(
             classes, tables::kTableArrayDescriptor, kClassRow, kClassStride, classRows)
         || classRows.count != classFlags_.size()
-        || !tables::read_array(index,
-                               tables::kTableArrayDescriptor,
-                               tables::kItemIndexTableClass,
-                               tables::kItemIndexRowStride,
-                               itemRows)) {
+        || !tables::find_array_at(index, tables::kTableArrayDescriptor, itemRows)
+        || itemRows.elementClass != tables::kItemIndexTableClass) {
         settle_unsupported("class_schema");
         return false;
     }
