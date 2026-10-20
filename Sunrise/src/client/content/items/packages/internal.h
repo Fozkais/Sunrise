@@ -261,6 +261,19 @@ read_investment_constants(const reader::Source& source,
                           state::build_data::constants::InvestmentConstants& output) noexcept;
 
 /**
+ * Reads and publishes the new-character table: per class, the items a new character gets.
+ * @param source Package source.
+ * @param scratch Reader scratch.
+ * @param root Investment root bytes.
+ * @param blob Scratch storage for the table blob.
+ * @return False only when the tag does not read, so a later slice retries it.
+ */
+[[nodiscard]] bool build_starter_sets(const reader::Source& source,
+                                      reader::Scratch& scratch,
+                                      std::span<const std::byte> root,
+                                      std::vector<std::byte>& blob) noexcept;
+
+/**
  * Builds the ability buckets one subclass publishes under one ability selection.
  * @param source Package source.
  * @param scratch Reader scratch.

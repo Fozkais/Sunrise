@@ -1,11 +1,16 @@
-/** Character creation and deletion logic. */
+/** Character creation and deletion. */
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <mutex>
+#include <optional>
 
 #include "../../core/logging/log.h"
 #include "../account/account_state.h"
 #include "../account/inventory/inventory_state.h"
+#include "../build_data/runtime.h"
 #include "../investment/store_internal.h"
 #include "runtime.h"
 #include "state_account_transaction_helpers.h"
@@ -15,133 +20,157 @@ namespace {
 
 namespace authored_inventory = account::inventory;
 
-/** One authored equipment slot this build seeds every newly created character with. */
-struct StarterItem {
-    authored_inventory::EquipmentSlot slot;
-    std::uint32_t definitionHash;
-    std::int32_t level;
-};
+/** Sunrise's own starter rows one class may list. The bundled table lists one. */
+constexpr std::size_t kAuthoredStarterCapacity = 16;
+/** A powered item needs a nonzero level. Level 1 already scores the Power floor. */
+constexpr std::int32_t kMinimumPoweredLevel = 1;
+
+/** @return True for a weapon or armour slot; these lead the slot order and alone carry Power. */
+[[nodiscard]] constexpr bool powered_slot(std::size_t slot) noexcept {
+    return slot <= static_cast<std::size_t>(authored_inventory::EquipmentSlot::classItem);
+}
 
 /**
- * The 10 equipment slots the real client draws identically regardless of class: weapons, and the
- * cosmetic/utility slots (ghost, vehicle, ship, clan banner, emote, finisher, artifact). Hashes
- * and levels are copied verbatim from `resources/database/investment_defaults.sql`'s seed rows
- * for character slot 0, and cross-checked against the T4tsuk3i fork's per-class
- * `default_settings.json` templates -- identical across all three classes there too.
+ * Picks the level a new character's weapons and armour get.
+ * It is the strongest level any character already holds, so a new character keeps pace.
+ * @param account Account before the new character joins.
+ * @return That level, and never less than the powered minimum.
  */
-constexpr std::array<StarterItem, 10> kSharedStarterItems{{
-    {authored_inventory::EquipmentSlot::kinetic, 3843477312U, 106},
-    {authored_inventory::EquipmentSlot::energy, 1096206669U, 106},
-    {authored_inventory::EquipmentSlot::heavy, 1864563948U, 106},
-    {authored_inventory::EquipmentSlot::ghost, 4135938409U, 0},
-    {authored_inventory::EquipmentSlot::vehicle, 3317837688U, 0},
-    {authored_inventory::EquipmentSlot::ship, 292872938U, 0},
-    {authored_inventory::EquipmentSlot::clanBanner, 1460578929U, 0},
-    {authored_inventory::EquipmentSlot::emote, 2038017661U, 0},
-    {authored_inventory::EquipmentSlot::finisher, 152583919U, 0},
-    {authored_inventory::EquipmentSlot::artifact, 1631206822U, 0},
-}};
+[[nodiscard]] std::int32_t starter_level(const AccountState& account) noexcept {
+    std::int32_t level = kMinimumPoweredLevel;
+    for (std::size_t index = 0; index < account.characterCount; ++index) {
+        level = (std::max)(level, runtime::detail::acquisition_level(account.characters[index]));
+    }
+    return level;
+}
 
 /**
- * The 7 equipment slots the real client renders per class: armor silhouette, the class item, the
- * subclass (and the abilities/animations it drives), and the class-flavored emblem variant.
- * Equipping another class's items here is exactly the "Hunter wearing Titan gear and subclass"
- * mixup this build must not produce. Indexed by `CharacterClass`'s own wire value (titan=0,
- * hunter=1, warlock=2). Hashes copied from the T4tsuk3i fork's `default_settings.json`, which
- * carries a real, in-game-verified template per class; cross-checked against this build's own
- * default character (class hunter) for the slots the two sources share, which matched exactly.
+ * Picks the lowest character id after the account's own that no character holds.
+ * Survivors keep their ids across a delete, so a slot index can name a living character.
+ * @param account Account the new character joins.
+ * @return The free id, or zero when every id is taken.
  */
-constexpr std::array<std::array<StarterItem, 7>, 3> kPerClassStarterItems{{
-    // titan
-    {{
-        {authored_inventory::EquipmentSlot::helmet, 0xECB479E4U, 106},
-        {authored_inventory::EquipmentSlot::gauntlets, 0xE98EBABDU, 106},
-        {authored_inventory::EquipmentSlot::chest, 0x542FC543U, 106},
-        {authored_inventory::EquipmentSlot::legs, 0xD2F64E86U, 106},
-        {authored_inventory::EquipmentSlot::classItem, 0x295F70BAU, 106},
-        {authored_inventory::EquipmentSlot::subclass, 0xB920CE9AU, 0},
-        {authored_inventory::EquipmentSlot::emblem, 0x71B4CC1BU, 0},
-    }},
-    // hunter
-    {{
-        {authored_inventory::EquipmentSlot::helmet, 0xF2994B80U, 106},
-        {authored_inventory::EquipmentSlot::gauntlets, 0x61868551U, 106},
-        {authored_inventory::EquipmentSlot::chest, 0x6F0DBB07U, 106},
-        {authored_inventory::EquipmentSlot::legs, 0x0B8E36D0U, 106},
-        {authored_inventory::EquipmentSlot::classItem, 0xB578E716U, 106},
-        {authored_inventory::EquipmentSlot::subclass, 0xD8B8D1FCU, 0},
-        {authored_inventory::EquipmentSlot::emblem, 0x71B4CC1AU, 0},
-    }},
-    // warlock
-    {{
-        {authored_inventory::EquipmentSlot::helmet, 0xEA042965U, 106},
-        {authored_inventory::EquipmentSlot::gauntlets, 0x188C5834U, 106},
-        {authored_inventory::EquipmentSlot::chest, 0xF8689C4CU, 106},
-        {authored_inventory::EquipmentSlot::legs, 0x083E04B6U, 106},
-        {authored_inventory::EquipmentSlot::classItem, 0x99446581U, 106},
-        {authored_inventory::EquipmentSlot::subclass, 0xCF88FEA5U, 0},
-        {authored_inventory::EquipmentSlot::emblem, 0x71B4CC19U, 0},
-    }},
-}};
-
-/**
- * Equips the class-appropriate starter loadout, each item given a freshly allocated instance SOID
- * instead of a fixed one: the same hashes are granted to every created character of a class, so a
- * literal SOID would collide the moment more than one has ever carried this loadout.
- * @param account In-out account; scanned for collision-free SOIDs as each item is assigned one.
- *                Must already count `character` towards `characterCount`, so the scan sees this
- *                character's own items as they are assigned, not just prior characters.
- * @param character In-out character, already appended to account.characters and counted. Its
- *                  `characterClass` selects which armor/class-item/subclass row is granted.
- * @return False when a fresh SOID could not be allocated; the character is left without a
- *         loadout, exactly as it started, rather than half-equipped.
- */
-[[nodiscard]] bool seed_starter_loadout(AccountState& account, CharacterState& character) noexcept {
-    const auto& perClass =
-        kPerClassStarterItems[static_cast<std::size_t>(character.characterClass)];
-    std::int32_t maxMutationSerial = -1;
-    std::int32_t serial = 0;
-    const auto place = [&](const StarterItem& starter) noexcept {
-        std::uint64_t freshSoid = 0;
-        if (!runtime::detail::next_item_instance_soid(account, freshSoid)) {
-            return false;
+[[nodiscard]] std::uint64_t free_character_soid(const AccountState& account) noexcept {
+    const auto begin = account.characters.begin();
+    const auto end = begin + static_cast<std::ptrdiff_t>(account.characterCount);
+    for (std::uint64_t offset = 1; offset <= account.characters.size(); ++offset) {
+        const std::uint64_t candidate = account.primarySoid + offset;
+        const bool taken = std::any_of(begin, end, [candidate](const CharacterState& character) {
+            return character.soid == candidate;
+        });
+        if (!taken) {
+            return candidate;
         }
-        authored_inventory::Item item{};
-        item.instanceSoid = freshSoid;
-        item.definitionHash = starter.definitionHash;
-        item.level = starter.level;
-        item.quantity = 1;
-        item.mutationSerial = serial;
-        item.sockets.policy = authored_inventory::SocketPolicy::nativeDefaults;
-        character.equipment.slots[static_cast<std::size_t>(starter.slot)] = item;
-        maxMutationSerial = serial;
-        ++serial;
+    }
+    return 0;
+}
+
+/**
+ * Resolves the semantic equipment slot one item takes.
+ * @param definitionHash Item definition hash.
+ * @param slot Receives the semantic slot.
+ * @return False when the item is not installed or takes no supported slot.
+ */
+[[nodiscard]] bool starter_slot(std::uint32_t definitionHash, std::size_t& slot) noexcept {
+    build_data::items::Definition definition{};
+    build_data::items::details::Definition detail{};
+    std::uint8_t nativeSlot = 0;
+    return build_data::find_item_definition_hash(definitionHash, definition)
+           && build_data::find_configured_item_detail(definition.definitionIndex, detail)
+           && authored_inventory::resolve_native_equipment_slot(
+               definitionHash, detail.equipmentSlot, nativeSlot)
+           && runtime::detail::semantic_equipment_slot(nativeSlot, slot);
+}
+
+/**
+ * Gives one starter item to a new character: equipped when its slot is free, else unequipped.
+ * @param account Account that already counts the character, so a new item id cannot collide.
+ * @param character The new character inside account.
+ * @param definitionHash Item to give.
+ * @param level Level a weapon or armour piece gets. Every other item gets none.
+ * @return False when the item takes no slot, no item id is free, or the inventory is full.
+ */
+[[nodiscard]] bool give_starter_item(AccountState& account,
+                                     CharacterState& character,
+                                     std::uint32_t definitionHash,
+                                     std::int32_t level) noexcept {
+    std::size_t slot = 0;
+    authored_inventory::Item item{};
+    if (!starter_slot(definitionHash, slot)
+        || !runtime::detail::next_item_instance_soid(account, item.instanceSoid)) {
+        return false;
+    }
+    item.definitionHash = definitionHash;
+    item.level = powered_slot(slot) ? level : 0;
+    item.quantity = 1;
+    item.mutationSerial = static_cast<std::int32_t>(character.nextInventorySerial++);
+    std::optional<authored_inventory::Item>& equipped = character.equipment.slots[slot];
+    if (!equipped.has_value()) {
+        equipped = item;
         return true;
-    };
-    for (const StarterItem& starter : kSharedStarterItems) {
-        if (!place(starter)) {
-            character.equipment = {};
-            core::log::write(core::log::Channel::state,
-                             core::log::Level::warn,
-                             "ev=create_character stage=loadout result=fail reason=soid_exhausted");
-            return false;
-        }
     }
-    for (const StarterItem& starter : perClass) {
-        if (!place(starter)) {
-            character.equipment = {};
-            core::log::write(core::log::Channel::state,
-                             core::log::Level::warn,
-                             "ev=create_character stage=loadout result=fail reason=soid_exhausted");
-            return false;
-        }
+    if (character.inventory.count >= character.inventory.values.size()) {
+        return false;
     }
-    character.nextInventorySerial = static_cast<std::uint32_t>(maxMutationSerial + 1);
+    character.inventory.values[character.inventory.count++] = item;
     return true;
+}
+
+/**
+ * Gives a new character Sunrise's own starter rows, then the packages' new-character set.
+ * The first item for a slot is equipped. A later item for the same slot stays unequipped.
+ * @param account Account that already counts the character.
+ * @param character The new character inside account.
+ * @param level Level for weapons and armour.
+ * @return False when either source does not read for the class, or one item cannot be given.
+ */
+[[nodiscard]] bool
+seed_starter_set(AccountState& account, CharacterState& character, std::int32_t level) noexcept {
+    const auto characterClass = static_cast<std::uint8_t>(character.characterClass);
+    std::array<std::uint32_t, kAuthoredStarterCapacity> authored{};
+    std::size_t authoredCount = 0;
+    build_data::starter_sets::Definition packaged{};
+    if (!investment::store::read_starter_items(characterClass, authored, authoredCount)
+        || !build_data::find_starter_set(characterClass, packaged)) {
+        return false;
+    }
+    for (std::size_t index = 0; index < authoredCount; ++index) {
+        if (!give_starter_item(account, character, authored[index], level)) {
+            return false;
+        }
+    }
+    for (std::size_t index = 0; index < packaged.itemCount; ++index) {
+        build_data::items::Definition definition{};
+        if (!build_data::find_item_definition_index(packaged.itemIndices[index], definition)
+            || !give_starter_item(account, character, definition.definitionHash, level)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/** Logs one refused roster change with the stage that refused it. */
+void report_refusal(const char* event, const char* stage) noexcept {
+    core::log::writef(core::log::Channel::state,
+                      core::log::Level::warn,
+                      "ev=%s stage=%s result=fail",
+                      event,
+                      stage);
 }
 
 } // namespace
 
+/**
+ * Adds a character to a free slot with its starter set and saves the account.
+ * The character joins unselected. Only an opcode-504 or 505 pick selects a character.
+ * @param characterClass Character class: 0 Titan, 1 Hunter, 2 Warlock.
+ * @param gender Character gender: 0 male, 1 female.
+ * @param race Character race: 0 human, 1 awoken, 2 exo.
+ * @param appearanceHeader Appearance header from the request, in record byte order.
+ * @param characterSoid Receives the new character's id, zero on failure.
+ * @return False when a value is out of range, the roster is full, the starter set does not
+ *         resolve, or the save refuses the account.
+ */
 bool create_character(std::uint8_t characterClass,
                       std::uint8_t gender,
                       std::uint8_t race,
@@ -151,163 +180,85 @@ bool create_character(std::uint8_t characterClass,
     if (characterClass > static_cast<std::uint8_t>(CharacterClass::warlock)
         || gender > static_cast<std::uint8_t>(CharacterGender::female)
         || race > static_cast<std::uint8_t>(CharacterRace::exo)) {
-        core::log::writef(core::log::Channel::state,
-                          core::log::Level::warn,
-                          "ev=create_character stage=range result=fail class=%u gender=%u race=%u",
-                          static_cast<unsigned>(characterClass),
-                          static_cast<unsigned>(gender),
-                          static_cast<unsigned>(race));
+        report_refusal("create_character", "range");
         return false;
     }
-
-    investment::store::g_mutex.lock();
+    const std::lock_guard lock(investment::store::g_mutex);
     AccountState candidate = investment::store::account();
-    core::log::writef(core::log::Channel::state,
-                      core::log::Level::info,
-                      "ev=create_character stage=request class=%u gender=%u race=%u chars=%zu "
-                      "cap=%zu primary=0x%016llX",
-                      static_cast<unsigned>(characterClass),
-                      static_cast<unsigned>(gender),
-                      static_cast<unsigned>(race),
-                      candidate.characterCount,
-                      candidate.characters.size(),
-                      static_cast<unsigned long long>(candidate.primarySoid));
-    if (candidate.characterCount >= candidate.characters.size() || candidate.primarySoid == 0) {
-        investment::store::g_mutex.unlock();
-        core::log::write(core::log::Channel::state,
-                         core::log::Level::warn,
-                         "ev=create_character stage=capacity_or_primary result=fail");
+    const std::uint64_t soid =
+        candidate.primarySoid == 0 || candidate.characterCount >= candidate.characters.size()
+            ? 0
+            : free_character_soid(candidate);
+    if (soid == 0) {
+        report_refusal("create_character", "slot");
         return false;
     }
-
-    const std::size_t index = candidate.characterCount;
-    // The slot index cannot name the SOID: deletion keeps every survivor's SOID, so after
-    // deleting a middle character the next free index already belongs to a living one. The
-    // lowest unused offset is taken instead, which reuses a freed SOID without ever colliding.
-    for (std::uint64_t offset = 1U; offset <= candidate.characters.size(); ++offset) {
-        const std::uint64_t soidCandidate = candidate.primarySoid + offset;
-        bool taken = false;
-        for (std::size_t existing = 0; existing < candidate.characterCount; ++existing) {
-            if (candidate.characters[existing].soid == soidCandidate) {
-                taken = true;
-                break;
-            }
-        }
-        if (!taken) {
-            characterSoid = soidCandidate;
-            break;
-        }
-    }
-    if (characterSoid == 0) {
-        investment::store::g_mutex.unlock();
-        core::log::write(
-            core::log::Channel::state, core::log::Level::warn, "ev=create_character stage=soid result=fail");
-        return false;
-    }
-
-    CharacterState& character = candidate.characters[index];
+    const std::int32_t level = starter_level(candidate);
+    CharacterState& character = candidate.characters[candidate.characterCount];
     character = {};
-    character.soid = characterSoid;
+    character.soid = soid;
     character.race = static_cast<CharacterRace>(race);
     character.gender = static_cast<CharacterGender>(gender);
     character.characterClass = static_cast<CharacterClass>(characterClass);
-    // Captured from the creation request, so the character keeps the face the player built
-    // instead of the single fixed header every character used to share.
     character.appearanceHeader = appearanceHeader;
     character.appearanceHeaderValid = true;
-
-    // The new character joins the roster unselected. Marking it selected here would be a pick
-    // the player never made, and a pick is what leaves the character-select step for orbit, so
-    // creation would skip the roster it just changed. Nothing is picked until the player picks.
+    if (!investment::store::read_starter_character(character)) {
+        report_refusal("create_character", "starter_character");
+        return false;
+    }
+    // Counted before seeding, so each new item id sees the items given before it.
     ++candidate.characterCount;
-
-    // Counted above so the fresh-SOID scan inside sees this character's own items as they are
-    // assigned, not just the characters that existed before it. Without a loadout the character
-    // has no equipped gear, and the Family-4 encoder refuses to publish a character with nothing
-    // equipped (an empty gear set has no light average to divide), so it would exist in the
-    // database but never actually reach the client.
-    if (!seed_starter_loadout(candidate, character)) {
-        investment::store::g_mutex.unlock();
-        characterSoid = 0;
+    if (!seed_starter_set(candidate, character, level)) {
+        report_refusal("create_character", "starter_set");
         return false;
     }
-
-    if (!account::valid(candidate) || !investment::store::write_account(candidate)) {
-        investment::store::g_mutex.unlock();
-        core::log::writef(core::log::Channel::state,
-                          core::log::Level::warn,
-                          "ev=create_character stage=commit result=fail primary=0x%016llX chars=%zu",
-                          static_cast<unsigned long long>(candidate.primarySoid),
-                          candidate.characterCount);
-        characterSoid = 0;
+    if (!investment::store::write_account(candidate)) {
+        report_refusal("create_character", "commit");
         return false;
     }
-    for (std::size_t i = 0; i < candidate.characters.size(); ++i) {
-        investment::store::g_session.selected[i] = candidate.characters[i].selected;
-    }
-    investment::store::g_mutex.unlock();
+    // The new class's subclasses may have no ability row yet; the next refresh rebuilds them.
+    build_data::invalidate_ability_buckets();
+    characterSoid = soid;
     core::log::writef(core::log::Channel::state,
                       core::log::Level::info,
-                      "ev=create_character stage=commit result=ok soid=0x%016llX chars=%zu",
-                      static_cast<unsigned long long>(characterSoid),
+                      "ev=create_character result=ok soid=0x%016llX chars=%zu",
+                      static_cast<unsigned long long>(soid),
                       candidate.characterCount);
     return true;
 }
 
+/**
+ * Removes one character, its items and its slot-keyed rows, and saves the account.
+ * Survivors keep their ids and move down one slot. The selection never moves.
+ * @param characterSoid Id of the character to remove.
+ * @return False when no character has that id or the save refuses the change.
+ */
 bool delete_character(std::uint64_t characterSoid) noexcept {
-    if (characterSoid == 0) {
-        return false;
-    }
-
-    investment::store::g_mutex.lock();
+    const std::lock_guard lock(investment::store::g_mutex);
     AccountState candidate = investment::store::account();
-    if (candidate.characterCount == 0 || candidate.primarySoid == 0) {
-        investment::store::g_mutex.unlock();
+    const auto begin = candidate.characters.begin();
+    const auto end = begin + static_cast<std::ptrdiff_t>(candidate.characterCount);
+    const auto found = std::find_if(begin, end, [characterSoid](const CharacterState& character) {
+        return character.soid == characterSoid;
+    });
+    if (characterSoid == 0 || found == end) {
+        report_refusal("delete_character", "find");
         return false;
     }
-
-    std::size_t found = candidate.characterCount;
-    for (std::size_t i = 0; i < candidate.characterCount; ++i) {
-        if (candidate.characters[i].soid == characterSoid) {
-            found = i;
-            break;
-        }
-    }
-    if (found == candidate.characterCount) {
-        investment::store::g_mutex.unlock();
-        return false;
-    }
-
-    // Survivors keep the SOID they were created with. Rebasing them onto their new slot index
-    // silently renames living characters, which strands every object the client already holds
-    // under the old SOID -- its roster entry, its Family-4 body and its banner all keyed by it.
-    for (std::size_t i = found; i + 1 < candidate.characterCount; ++i) {
-        candidate.characters[i] = candidate.characters[i + 1U];
-    }
+    const auto slot = static_cast<std::size_t>(found - begin);
+    std::move(found + 1, end, found);
     --candidate.characterCount;
     candidate.characters[candidate.characterCount] = {};
-
-    // Removing a character never creates a selection. The deleted character's own flag left with
-    // its slot, and handing the selection to a survivor would be a pick the player never made --
-    // which is what leaves the character-select step for orbit, skipping the shrunken roster the
-    // delete just produced. The selection moves only when the player picks (opcodes 504 and 505).
-
-    if (!account::valid(candidate) || !investment::store::write_account(candidate)) {
-        investment::store::g_mutex.unlock();
-        core::log::writef(core::log::Channel::state,
-                          core::log::Level::warn,
-                          "ev=delete_character stage=commit result=fail soid=0x%016llX",
-                          static_cast<unsigned long long>(characterSoid));
+    // Both writes share one save transaction, so a refused one leaves neither.
+    investment::store::Transaction transaction;
+    if (!transaction.ready() || !investment::store::write_account(candidate)
+        || !investment::store::remove_character_rows(slot) || !transaction.commit()) {
+        report_refusal("delete_character", "commit");
         return false;
     }
-    for (std::size_t i = 0; i < candidate.characters.size(); ++i) {
-        investment::store::g_session.selected[i] =
-            i < candidate.characterCount && candidate.characters[i].selected;
-    }
-    investment::store::g_mutex.unlock();
     core::log::writef(core::log::Channel::state,
                       core::log::Level::info,
-                      "ev=delete_character stage=commit result=ok soid=0x%016llX chars=%zu",
+                      "ev=delete_character result=ok soid=0x%016llX chars=%zu",
                       static_cast<unsigned long long>(characterSoid),
                       candidate.characterCount);
     return true;

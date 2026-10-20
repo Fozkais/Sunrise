@@ -474,15 +474,13 @@ void publish_sign_in_time(std::uint64_t seconds) noexcept;
 [[nodiscard]] bool set_selected_character(std::uint64_t characterSoid) noexcept;
 
 /**
- * Creates a new character in an unused slot and persists the account.
- * @param characterClass Character class (0=titan, 1=hunter, 2=warlock).
- * @param gender Character gender (0=male, 1=female).
- * @param race Character race (0=human, 1=awoken, 2=exo).
- * @param appearanceHeader Authored appearance header captured from the creation request, in
- *                        record byte order. Only meaningful beside the `race` it arrived with.
- * @param characterSoid Receives the SOID of the newly created character.
- * @return True when the character was created, the account still validates, and the write
- *         committed.
+ * Adds an unselected character to a free slot with its starter set and saves the account.
+ * @param characterClass Character class: 0 Titan, 1 Hunter, 2 Warlock.
+ * @param gender Character gender: 0 male, 1 female.
+ * @param race Character race: 0 human, 1 awoken, 2 exo.
+ * @param appearanceHeader Appearance header from the request, in record byte order.
+ * @param characterSoid Receives the new character's id, zero on failure.
+ * @return False when nothing was saved.
  */
 [[nodiscard]] bool create_character(std::uint8_t characterClass,
                                     std::uint8_t gender,
@@ -491,10 +489,9 @@ void publish_sign_in_time(std::uint64_t seconds) noexcept;
                                     std::uint64_t& characterSoid) noexcept;
 
 /**
- * Deletes a character by SOID and persists the account.
- * @param characterSoid SOID of the character to delete.
- * @return True when the character was found, removed, the account still validates, and the
- *         write committed.
+ * Removes one character with its items and slot-keyed rows and saves the account.
+ * @param characterSoid Id of the character to remove.
+ * @return False when nothing was saved.
  */
 [[nodiscard]] bool delete_character(std::uint64_t characterSoid) noexcept;
 

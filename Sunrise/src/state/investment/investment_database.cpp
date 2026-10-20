@@ -79,12 +79,23 @@ bool Statement::text(int column, std::string_view& value) const noexcept {
     return true;
 }
 
-/** New databases receive schema and defaults in one durable transaction. */
+/**
+ * Opens the save, creating it from the bundled SQL or upgrading an older schema in place.
+ * A new database gets the schema and every default in one durable transaction.
+ * @param path Save file name, or `:memory:`.
+ * @param schema Investment schema SQL.
+ * @param defaults Investment default rows SQL.
+ * @param settingsSchema Account preference schema SQL.
+ * @param settingsDefaults Account preference default rows SQL.
+ * @param characterStarter Created-character starting tables and rows SQL.
+ * @return False when the save does not open, is not ours, or does not upgrade.
+ */
 bool open(std::string_view path,
           std::string_view schema,
           std::string_view defaults,
           std::string_view settingsSchema,
-          std::string_view settingsDefaults) noexcept {
+          std::string_view settingsDefaults,
+          std::string_view characterStarter) noexcept {
     const std::lock_guard lock(g_mutex);
     if (g_database != nullptr) {
         return false;
@@ -109,6 +120,7 @@ bool open(std::string_view path,
     }
     const std::string preferenceSchema(settingsSchema);
     const std::string preferenceDefaults(settingsDefaults);
+    const std::string starterText(characterStarter);
     if (ready && version == 0) {
         Transaction transaction;
         const std::string schemaText(schema);
@@ -117,9 +129,10 @@ bool open(std::string_view path,
                 && execute(schemaText.c_str()) && execute(defaultText.c_str())
                 && !settingsSchema.empty() && !settingsDefaults.empty()
                 && execute(preferenceSchema.c_str()) && execute(preferenceDefaults.c_str())
+                && !characterStarter.empty() && execute(starterText.c_str())
                 && transaction.commit();
     } else if (ready) {
-        // Version 3 adds the per-character appearance header. Version 2 added account
+        // Version 3 adds the appearance header and the starter tables. Version 2 added account
         // preferences and per-item seen state.
         constexpr int kSchemaVersion = 3;
         constexpr int kApplicationId = 1397902921;
@@ -145,19 +158,16 @@ bool open(std::string_view path,
     }
     if (ready && version == 2) {
         Transaction transaction;
-        // A character predating this column has no captured header; the zero blob is never
-        // read, since appearance_header_valid stays 0 and both encoders fall back to the fixed
-        // default header for it.
-        ready = transaction.ready()
-                // SQLite's ADD COLUMN refuses a non-constant default (zeroblob(36) included),
-                // so the fill value has to be a literal blob, not a function call.
-                && execute(
-                    "ALTER TABLE characters ADD COLUMN appearance_header BLOB NOT NULL "
-                    "DEFAULT (X'000000000000000000000000000000000000000000000000000000000000"
-                    "000000000000') CHECK (length(appearance_header) = 36);"
-                    "ALTER TABLE characters ADD COLUMN appearance_header_valid INTEGER "
-                    "NOT NULL DEFAULT 0 CHECK (appearance_header_valid IN (0, 1));")
-                && execute("PRAGMA user_version=3") && transaction.commit();
+        // Older characters keep the fixed default header: their zero blob is marked invalid.
+        // ADD COLUMN refuses a function default such as zeroblob(), so the blob is a literal.
+        ready = transaction.ready() && !characterStarter.empty()
+                && execute("ALTER TABLE characters ADD COLUMN appearance_header BLOB NOT NULL "
+                           "DEFAULT (X'000000000000000000000000000000000000000000000000000000000000"
+                           "000000000000') CHECK (length(appearance_header) = 36);"
+                           "ALTER TABLE characters ADD COLUMN appearance_header_valid INTEGER "
+                           "NOT NULL DEFAULT 0 CHECK (appearance_header_valid IN (0, 1));")
+                && execute(starterText.c_str()) && execute("PRAGMA user_version=3")
+                && transaction.commit();
     }
     if (!ready) {
         shutdown();

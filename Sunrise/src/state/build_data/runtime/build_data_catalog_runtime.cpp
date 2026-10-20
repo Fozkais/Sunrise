@@ -21,6 +21,7 @@
 #include "../socket_entry_buckets/socket_entry_bucket_catalog.h"
 #include "../socket_entry_lists/socket_entry_list_catalog.h"
 #include "../spawn_sets/spawn_set_catalog.h"
+#include "../starter_sets/starter_set_catalog.h"
 #include "../vendors/vendor_catalog.h"
 #include "domain_markers.h"
 #include "persistence/publication_transaction.h"
@@ -381,6 +382,7 @@ void clear_catalogs() noexcept {
     rollback_name_catalog_publication();
     vendors::clear();
     constants::clear();
+    starter_sets::clear();
 }
 
 } // namespace runtime

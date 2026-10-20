@@ -769,6 +769,8 @@
     <ClCompile Include="src\state\build_data\season_pass\season_pass_build_data_runtime.cpp" />
     <ClCompile Include="src\state\build_data\bounties\bounty_catalog.cpp" />
     <ClCompile Include="src\state\build_data\bounties\bounty_build_data_runtime.cpp" />
+    <ClCompile Include="src\state\build_data\starter_sets\starter_set_catalog.cpp" />
+    <ClCompile Include="src\state\build_data\starter_sets\starter_set_build_data_runtime.cpp" />
     <ClCompile Include="src\state\build_data\scriptables\scriptable_catalog.cpp" />
     <ClCompile Include="src\state\build_data\runtime\domain_markers.cpp" />
     <ClCompile Include="src\state\build_data\inventory\buckets\inventory_bucket_catalog.cpp" />
@@ -1162,6 +1164,7 @@
     <ClCompile Include="src\client\content\items\packages\package_collectible_build.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_material_requirement_build.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_detail_build.cpp" />
+    <ClCompile Include="src\client\content\items\packages\package_starter_set_build.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_catalyst_condition_reader.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_socket_plug_build.cpp" />
     <ClCompile Include="src\client\content\items\packages\package_ability_build.cpp" />
@@ -2094,6 +2097,8 @@
     <ClInclude Include="src\state\build_data\season_pass\season_pass_catalog.h" />
     <ClInclude Include="src\state\build_data\bounties\definition.h" />
     <ClInclude Include="src\state\build_data\bounties\bounty_catalog.h" />
+    <ClInclude Include="src\state\build_data\starter_sets\definition.h" />
+    <ClInclude Include="src\state\build_data\starter_sets\starter_set_catalog.h" />
     <ClInclude Include="src\state\build_data\vendors\repeatable_triggers.h" />
     <ClInclude Include="src\state\build_data\progressions\definition.h" />
     <ClInclude Include="src\state\entitlements\definition.h" />
@@ -2327,6 +2332,7 @@
     <ClInclude Include="src\state\account\inventory\seen_state.h" />
     <None Include="resources\database\account_settings_schema.sql" />
     <None Include="resources\database\account_settings_defaults.sql" />
+    <None Include="resources\database\character_starter.sql" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\state\activity_sdk\actor_sequences.h" />
