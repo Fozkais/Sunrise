@@ -483,7 +483,7 @@ void draw_dialogues(const sdk::BoundView& view, const mission::Snapshot& snapsho
                     ImGui::SameLine();
                     if (cueRow < cueRows.size()) {
                         const sdk::format::DialogueCue& definition = cueRows[cueRow];
-                        ImGui::Text("Cue %u  definition %08X  %.3f s  %u lines",
+                        ImGui::Text("Cue %u  definition %08X  window %.3f s  %u lines",
                                     static_cast<unsigned>(cue),
                                     static_cast<unsigned>(definition.definitionHash),
                                     static_cast<double>(definition.authoredWindowSeconds),

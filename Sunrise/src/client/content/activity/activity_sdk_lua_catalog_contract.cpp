@@ -292,8 +292,8 @@ constexpr std::array<RowSpec, 41> kRows{{
      "dialogue_cues",
      "dialogue_cues",
      "CatalogDialogueCueView",
-     "s:id;u32:slot_index;u32:cue_index;u32:list_tag;u32:definition_hash;u32:duration_ms;"
-     "u32:line_count;u32:flags;u32:reserved"},
+     "u32:slot_index;u32:cue_index;u32:definition_hash;u32:authored_window_seconds_bits;s:id;"
+     "u32:list_tag;u32:line_count;u32:flags;u32:reserved"},
 }};
 
 /** Splits the semicolon list into type:name pairs; false on a bad token or a refusing callback. */

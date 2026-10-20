@@ -418,7 +418,7 @@ bool attach_authored_text(const topology_inventory::Snapshot& topology,
                     cueRow.cueIndex = static_cast<std::uint32_t>(cue);
                     cueRow.listTag = resourceTag;
                     cueRow.definitionHash = row.definitionHash;
-                    cueRow.authoredWindowSeconds = row.seconds;
+                    cueRow.authoredWindowSeconds = row.windowSeconds;
                     const bool mismatched = row.status == dialogue_list::CueStatus::mismatched;
                     const bool hasLines =
                         mismatched || row.status == dialogue_list::CueStatus::resolved;

@@ -38,8 +38,8 @@ enum class CueStatus : std::uint8_t {
 /** One cue in list order. Lines are present only for resolved and mismatched cues. */
 struct Cue final {
     std::uint32_t definitionHash{};
-    /** Authored total: a sequence adds its children, a selection lasts its longest branch. */
-    float seconds{};
+    /** Authored window from the definition row; a tree must last as long to resolve. */
+    float windowSeconds{};
     std::uint32_t firstLine{};
     std::uint32_t lineCount{};
     CueStatus status{CueStatus::missing};

@@ -557,7 +557,8 @@ bool render_mission(const Source& source,
                 append_uint(dialogueDefinitionConstants, cue);
                 dialogueDefinitionConstants.append("] = { hash = ");
                 append_hex(dialogueDefinitionConstants, row.definitionHash);
-                dialogueDefinitionConstants.append(", duration_ms = ");
+                // The authored window bounds a delayed cue; it is not a playback length.
+                dialogueDefinitionConstants.append(", window_ms = ");
                 append_uint(dialogueDefinitionConstants,
                             state::activity_sdk::authored_milliseconds(row.authoredWindowSeconds));
                 dialogueDefinitionConstants.append(", lines = ");

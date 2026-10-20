@@ -236,7 +236,7 @@ bool read(std::span<const std::byte> list, Snapshot& output) {
     for (std::size_t index = 0; index < definitions.size(); ++index) {
         Cue& cue = output.cues[index];
         cue.definitionHash = definitions[index].hash;
-        cue.seconds = definitions[index].authoredWindowSeconds;
+        cue.windowSeconds = definitions[index].authoredWindowSeconds;
         const auto range = std::equal_range(trees.begin(),
                                             trees.end(),
                                             Tree{cue.definitionHash, 0},
@@ -255,7 +255,7 @@ bool read(std::span<const std::byte> list, Snapshot& output) {
                 malformed = true;
                 continue;
             }
-            if (std::fabs(seconds - cue.seconds) <= kSecondsTolerance) {
+            if (std::fabs(seconds - cue.windowSeconds) <= kSecondsTolerance) {
                 ++matches;
                 matched = std::move(walk.lines);
             } else {
