@@ -40,11 +40,9 @@ inline constexpr std::size_t kClientMessageHistoryCapacity = 512;
 /** Decoded packet details retained separately from the high-volume metadata history. */
 inline constexpr std::size_t kClientMessageDetailCapacity = 64;
 /** Latest complete msg-6 object observations retained for one activity generation. */
-inline constexpr std::size_t kSenseObservationCapacity =
-    middleware::bap::activity_message::sense_update::kDecodedObjectCapacity;
+inline constexpr std::size_t kSenseObservationCapacity = 128;
 /** Typed values owned by the retained msg-6 observations for one activity generation. */
-inline constexpr std::size_t kSenseObservationValueCapacity =
-    middleware::bap::activity_message::sense_update::kDecodedValueCapacity;
+inline constexpr std::size_t kSenseObservationValueCapacity = 1024;
 /** Per-slot counts the squad Sense body can carry. Its nested array is eight elements. */
 inline constexpr std::size_t kSquadSlotCapacity = 8;
 /** Objective task groups a squad publishes one cost for. */
