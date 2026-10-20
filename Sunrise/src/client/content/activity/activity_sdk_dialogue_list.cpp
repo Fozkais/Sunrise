@@ -203,6 +203,12 @@ struct Tree final {
 
 } // namespace
 
+/**
+ * Matches each cue definition to the content trees that carry its hash.
+ * @param list Authored dialogue list blob.
+ * @param output Receives the cues, their lines and the shared hashes; reset first.
+ * @return False when the definition or tree arrays are malformed.
+ */
 bool read(std::span<const std::byte> list, Snapshot& output) {
     output = {};
     std::vector<dialogue_group_index::Definition> definitions{};

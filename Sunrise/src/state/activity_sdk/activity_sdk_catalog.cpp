@@ -813,8 +813,10 @@ std::span<const format::DialogueCueText> cue_dialogue_texts(const Catalog& catal
     });
 }
 
+/** @return Zero for a negative or NaN input; saturates at the 32-bit maximum. */
 std::uint32_t authored_milliseconds(float seconds) noexcept {
-    const double value = std::round(static_cast<double>(seconds) * 1000.0);
+    constexpr double kMillisecondsPerSecond = 1000.0;
+    const double value = std::round(static_cast<double>(seconds) * kMillisecondsPerSecond);
     if (!(value > 0.0)) {
         return 0;
     }
